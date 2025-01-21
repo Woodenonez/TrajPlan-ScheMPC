@@ -1,0 +1,8 @@
+/mpc_solver
+/.vscode
+/.mypy_cache
+/archived
+
+__pycache__
+
+draft.py
