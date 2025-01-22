@@ -247,7 +247,7 @@ def Compo_slim(problem):
     print('         running time', running_time)
     if instance == sat:
         optimum = sum([i.length for i in current_routes])
-        print('         travelling distance: ',optimum)
+        print('         travelling distance: ',round(optimum,2))
 
         print('CURRENT ROUTES - WHEN THE INSTANCE IS SOLVED')
         for i in current_routes:

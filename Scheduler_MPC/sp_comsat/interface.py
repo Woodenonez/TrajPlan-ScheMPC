@@ -3,7 +3,8 @@ from Compo_slim import Compo_slim
 ###################### HERE IS WHERE THE ACTUAL TESTING STARTS ######################
 
 # problem = 'Volvo_gpss_2'
-problem = 'testPlant'
+# problem = 'testPlant'
+problem = 'PlantNoHubs'
 
 print(f'Problem: {problem}')
 

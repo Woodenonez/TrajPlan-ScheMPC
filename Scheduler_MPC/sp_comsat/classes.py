@@ -82,8 +82,7 @@ class Route:
         self.ST = ST
         self.CT = CT
     def display(self):
-        print('Route of length {} executed by vehicle {}'.format(self.length,
-                    self.vehicle.id))
+        print(f'Route of length {round(self.length,2)} executed by vehicle {self.vehicle.id}')
         print('Tasks: ',[i.id for i in self.tasks])
         print('Nodes: ', self.nodes)
         # print('Edges: ',self.edges)
