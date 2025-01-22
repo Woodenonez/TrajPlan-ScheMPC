@@ -1,0 +1,265 @@
+{
+  "test_data": {
+    "Big_number": 50.0,
+    "Autonomy": 20.0,
+    "charging_coefficient": 1.0,
+    "nodes": {
+      "home_10": {"x": 8.3,"y": 2.8,"next":["pre_home_10"]},
+      "home_12": {"x": 8.5,"y": 4.2,"next":["pre_home_12"]},
+      "home_16": {"x": 8.5,"y": 5.5,"next":["pre_home_16"]},
+      "pre_home_10": {"x": 10.0,"y": 3.0,"next":["home_10","wp_out_1", "wp_1"]},
+      "pre_home_12": {"x": 10.0,"y": 4.2,"next":["home_12", "wp_out_1", "wp_1"]},
+      "pre_home_16": {"x": 10.0,"y": 5.5,"next":["home_16", "wp_out_1", "wp_1"]},
+      "wp_out_1": {"x": 10.5,"y": 7.2,"next":["pre_home_16", "pre_home_12", "pre_home_10", "wp_out_2"]},
+      "wp_out_2": {"x": 13.5,"y": 7.2,"next":["wp_out_1", "wp_out_3"]},
+      "wp_out_3": {"x": 14.5,"y": 5.5,"next":["wp_out_2", "wp_out_4",  "wp_18", "wp_1"]},
+      "wp_1": {"x": 12.0,"y": 4.6,"next":["pre_home_16", "pre_home_12", "pre_home_10", "wp_out_3"]},
+      "wp_out_4": {"x": 18.0,"y": 5.5,"next":["target_10"]},
+      "target_10": {"x": 20.0,"y": 5.5,"next":["post_target_10", "target_12"]},
+      "target_12": {"x": 25.0,"y": 5.5,"next":["post_target_12", "target_16"]},
+      "target_16": {"x": 30.0,"y": 5.5,"next":["post_target_16"]},
+      "post_target_16": {"x": 30.0,"y": 4.0,"next":["post_target_12"]},
+      "post_target_12": {"x": 25.0,"y": 4.0,"next":["post_target_10"]},
+      "post_target_10": {"x": 20.0,"y": 4.0,"next":["wp_back_4"]},
+      "wp_back_4": {"x": 18.0,"y": 4.0,"next":["wp_1","wp_out_3","wp_18"]},
+      "wp_18": {"x": 1.5,"y": 0.0,"next":["wp_1", "wp_out_3"]}
+  },
+    "start_list": {
+      "atr_16": "home_16",
+      "atr_10": "home_10",
+      "atr_12": "home_12"
+    },
+    "charging_stations": [
+      "home_16",
+      "home_12",
+      "home_10"
+    ],
+    "hub_nodes": [
+      "home_16",
+      "home_12",
+      "home_10"
+    ]
+  },
+  "ATRs": {
+    "atr_16": {
+      "units": 1
+    },
+    "atr_12": {
+      "units": 1
+    },
+    "atr_10": {
+      "units": 1
+    }
+  },
+  "jobs": {
+    "task_3": {
+      "location": "post_target_12",
+      "precedence": [
+        "task_2"
+      ],
+      "TW": [],
+      "Service": 0.0,
+      "ATR": [
+        "atr_12"
+      ]
+    },
+    "task_4": {
+      "location": "target_16",
+      "precedence": [],
+      "TW": [],
+      "Service": 0.0,
+      "ATR": [
+        "atr_16"
+      ]
+    },
+    "task_5": {
+      "location": "post_target_16",
+      "precedence": [
+        "task_4"
+      ],
+      "TW": [],
+      "Service": 0.0,
+      "ATR": [
+        "atr_16"
+      ]
+    },
+    "task_0": {
+      "location": "target_10",
+      "precedence": [],
+      "TW": [],
+      "Service": 0.0,
+      "ATR": [
+        "atr_10"
+      ]
+    },
+    "task_1": {
+      "location": "post_target_10",
+      "precedence": [
+        "task_0"
+      ],
+      "TW": [],
+      "Service": 0.0,
+      "ATR": [
+        "atr_10"
+      ]
+    },
+    "task_2": {
+      "location": "target_12",
+      "precedence": [],
+      "TW": [],
+      "Service": 0.0,
+      "ATR": [
+        "atr_12"
+      ]
+    }
+  },
+  "edges": {
+    "wp_out_3,wp_out_2": [
+      1,
+      2
+    ],
+    "wp_out_1,pre_home_10": [
+      1,
+      2
+    ],
+    "target_10,post_target_10": [
+      1,
+      2
+    ],
+    "home_12,pre_home_12": [
+      1,
+      2
+    ],
+    "wp_1,pre_home_16": [
+      1,
+      2
+    ],
+    "wp_back_4,wp_out_3": [
+      1,
+      2
+    ],
+    "pre_home_12,wp_out_1": [
+      1,
+      2
+    ],
+    "post_target_16,post_target_12": [
+      1,
+      2
+    ],
+    "pre_home_16,wp_out_1": [
+      1,
+      2
+    ],
+    "pre_home_16,wp_1": [
+      1,
+      2
+    ],
+    "post_target_10,wp_back_4": [
+      1,
+      2
+    ],
+    "home_10,pre_home_10": [
+      1,
+      2
+    ],
+    "wp_out_1,pre_home_12": [
+      1,
+      2
+    ],
+    "pre_home_10,wp_out_1": [
+      1,
+      2
+    ],
+    "home_16,pre_home_16": [
+      1,
+      2
+    ],
+    "pre_home_10,home_10": [
+      1,
+      2
+    ],
+    "target_12,target_16": [
+      1,
+      2
+    ],
+    "target_10,target_12": [
+      1,
+      2
+    ],
+    "pre_home_16,home_16": [
+      1,
+      2
+    ],
+    "pre_home_10,wp_1": [
+      1,
+      2
+    ],
+    "wp_out_3,wp_1": [
+      1,
+      2
+    ],
+    "pre_home_12,home_12": [
+      1,
+      2
+    ],
+    "target_16,post_target_16": [
+      1,
+      2
+    ],
+    "wp_1,pre_home_12": [
+      1,
+      2
+    ],
+    "wp_out_3,wp_out_4": [
+      1,
+      2
+    ],
+    "pre_home_12,wp_1": [
+      1,
+      2
+    ],
+    "wp_out_2,wp_out_1": [
+      1,
+      2
+    ],
+    "wp_1,wp_out_3": [
+      1,
+      2
+    ],
+    "target_12,post_target_12": [
+      1,
+      2
+    ],
+    "wp_back_4,wp_1": [
+      1,
+      2
+    ],
+    "wp_out_2,wp_out_3": [
+      1,
+      2
+    ],
+    "wp_out_1,wp_out_2": [
+      1,
+      2
+    ],
+    "wp_1,pre_home_10": [
+      1,
+      2
+    ],
+    "wp_out_4,target_10": [
+      1,
+      2
+    ],
+    "wp_out_1,pre_home_16": [
+      1,
+      2
+    ],
+    "post_target_12,post_target_10": [
+      1,
+      2
+    ]
+  }
+}
+
+
+

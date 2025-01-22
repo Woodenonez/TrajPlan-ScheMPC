@@ -1,0 +1,300 @@
+{
+    "test_data": {
+        "Big_number": 5000,
+        "Autonomy": 5000,
+        "charging_coefficient": 1,
+        "nodes": {
+          "d_1": {"x":12,"y": 78,"next":["node_0"]},
+          "d_2": {"x":37, "y":78,"next":["node_3"]},
+          "node_0": {"x":12, "y":75,"next":["node_6", "node_1", "d_1"]},
+          "node_1": {"x":18, "y":75,"next":["node_4", "node_0"]},
+          "node_2": {"x":32, "y":75,"next":["node_5", "node_3"]},
+          "node_3": {"x":37, "y":75,"next":["node_9", "d_2", "node_2"]},
+          "node_4": {"x":18, "y":67,"next":["node_7", "L_1", "node_1"]},
+          "L_1": {"x":25, "y":67,"next":["node_5", "node_4"]},
+          "node_5": {"x":32, "y":67,"next": ["node_8", "node_2", "L_1"]},
+          "P_1": {"x":3, "y":58,"next":["node_6"]},
+          "node_6": {"x":12, "y":58,"next":["node_12", "node_7", "node_0", "P_1"]},
+          "node_7": {"x":18, "y":58,"next":["node_10", "node_4", "node_6"]},
+          "node_8": {"x":32, "y":58,"next":["node_11", "node_9", "node_5"]},
+          "node_9": {"x":37, "y":58,"next":["node_15", "P_5", "node_3", "node_8"]},
+          "P_5": {"x":47, "y":58,"next":["node_9"]},
+          "node_10": {"x":18, "y":49,"next":["node_13", "L_2", "node_7"]},
+          "L_2": {"x":25, "y":49,"next":["node_11", "node_10"]},
+          "node_11": {"x":32, "y":49,"next":["node_14", "node_8", "L_2"]},
+          "P_2": {"x":3, "y":40,"next":["node_12"]},
+          "node_12": {"x":12, "y":40,"next":["node_18", "node_13", "node_6", "P_2"]},
+          "node_13": {"x":18, "y":40,"next":["node_16", "node_10", "node_12"]},
+          "node_14": {"x":32, "y":40,"next":["node_17", "node_15", "node_11"]},
+          "node_15": {"x":37, "y":40,"next":["node_21", "P_6", "node_9", "node_14"]},
+          "P_6": {"x":47, "y":40,"next":["node_15"]},
+          "node_16": {"x":18, "y":31,"next":["node_19", "L_3", "node_13"]},
+          "L_3": {"x":25, "y":31,"next":["node_17", "node_16"]},
+          "node_17": {"x":32, "y":31,"next":["node_20", "node_14", "L_3"]},
+          "P_3": {"x":3, "y":22,"next":["node_18"]},
+          "node_18": {"x":12, "y":22,"next":["node_24", "node_19", "node_12", "P_3"]},
+          "node_19": {"x":18, "y":22,"next":["node_22", "node_16", "node_18"]},
+          "node_20": {"x":32, "y":22,"next":["node_23", "node_21", "node_17"]},
+          "node_21": {"x":37, "y":22,"next":["node_27", "P_7", "node_15", "node_20"]},
+          "P_7": {"x":47, "y":22,"next":["node_21"]},
+          "node_22": {"x":18, "y":13,"next":["node_25", "L_4", "node_19"]},
+          "L_4": {"x":25, "y":13,"next":["node_23", "node_22"]},
+          "node_23": {"x":32, "y":13,"next":["node_26", "node_20", "L_4"]},
+          "P_4": {"x":3, "y":4,"next":["node_24"]},
+          "node_24": {"x":12, "y":4,"next":["node_25", "node_18", "P_4"]},
+          "node_25": {"x":18, "y":4,"next":["node_22", "node_24"]},
+          "node_26": {"x":32, "y":4,"next":["node_27", "node_23"]},
+          "node_27": {"x":37, "y":4,"next":["P_8", "node_21", "node_26"]},
+          "P_8": {"x":47, "y":4,"next":["node_27"]}
+        },
+        "start_list": {
+            "A": "d_2",
+            "B": "d_1"
+        },
+        "charging_stations": [
+            "d_2",
+            "d_1"
+        ],
+        "hub_nodes": [
+            "d_2",
+            "d_1",
+            "node_0",
+            "node_6",
+            "node_12",
+            "node_18",
+            "node_24",
+            "node_3",
+            "node_9",
+            "node_15",
+            "node_21",
+            "node_27"
+
+        ]
+    },
+    "ATRs": {
+        "A": {
+            "units": 3
+        },
+        "B": {
+            "units": 2
+        }
+    },
+    "jobs": {
+        "1": {
+            "location": "P_8",
+            "precedence": [],
+            "TW": [],
+            "Service": 5,
+            "ATR": ["A"]
+        },
+        "2": {
+            "location": "P_6",
+            "precedence": ["1"],
+            "TW": [],
+            "Service": 5,
+            "ATR": ["A"]
+        },
+        "3": {
+              "location": "L_4",
+              "precedence": ["1","2"],
+              "TW": [0,5000],
+              "Service": 10,
+              "ATR": ["A"]
+          },
+
+        "4": {
+            "location": "P_4",
+            "precedence": [],
+            "TW": [],
+            "Service": 5,
+            "ATR": ["B"]
+        },
+        "5": {
+            "location": "P_3",
+            "precedence": ["4"],
+            "TW": [],
+            "Service": 0,
+            "ATR": ["B"]
+        },
+        "6": {
+              "location": "L_3",
+              "precedence": ["4","5"],
+              "TW": [0,5000],
+              "Service": 0,
+              "ATR": ["B"]
+          },
+
+
+        "7": {
+            "location": "P_5",
+            "precedence": [],
+            "TW": [],
+            "Service": 5,
+          "ATR": ["A"]
+        },
+        "8": {
+            "location": "P_6",
+            "precedence": ["7"],
+            "TW": [],
+            "Service": 0,
+          "ATR": ["A"]
+        },
+        "9": {
+            "location": "L_2",
+            "precedence": ["7","8"],
+            "TW": [0,5000],
+            "Service": 0,
+        "ATR": ["A"]
+        },
+
+
+        "10": {
+            "location": "P_1",
+            "precedence": [],
+            "TW": [],
+            "Service": 5,
+          "ATR": ["B"]
+        },
+        "11": {
+            "location": "P_2",
+            "precedence": ["10"],
+            "TW": [],
+            "Service": 0,
+          "ATR": ["B"]
+        },
+        "12": {
+            "location": "L_2",
+            "precedence": ["10","11"],
+            "TW": [0,5000],
+            "Service": 0,
+        "ATR": ["B"]
+        },
+        "13": {
+            "location": "P_5",
+            "precedence": [],
+            "TW": [],
+            "Service": 5,
+          "ATR": ["A"]
+        },
+        "14": {
+            "location": "P_7",
+            "precedence": ["13"],
+            "TW": [],
+            "Service": 0,
+          "ATR": ["A"]
+        },
+        "15": {
+            "location": "L_1",
+            "precedence": ["13","14"],
+            "TW": [0,5000],
+            "Service": 0,
+        "ATR": ["A"]
+        }
+    },
+    "edges": {
+      "d_1,node_0":[3.0,1],
+      "node_0,node_6":[17.0,2],
+      "node_6,node_12":[18.0,2],
+      "node_12,node_18":[18.0,2],
+      "node_18,node_24":[18.0,2],
+      "node_1,node_4":[8.0,1],
+      "node_4,node_7":[9.0,1],
+      "node_7,node_10":[9.0,1],
+      "node_10,node_13":[9.0,1],
+      "node_13,node_16":[9.0,1],
+      "node_16,node_19":[9.0,1],
+      "node_19,node_22":[9.0,1],
+      "node_22,node_25":[9.0,1],
+      "node_2,node_5":[8.0,1],
+      "node_5,node_8":[9.0,1],
+      "node_8,node_11":[9.0,1],
+      "node_11,node_14":[9.0,1],
+      "node_14,node_17":[9.0,1],
+      "node_17,node_20":[9.0,1],
+      "node_20,node_23":[9.0,1],
+      "node_23,node_26":[9.0,1],
+      "d_2,node_3":[3.0,1],
+      "node_3,node_9":[17.0,2],
+      "node_9,node_15":[18.0,2],
+      "node_15,node_21":[18.0,2],
+      "node_21,node_27":[18.0,2],
+      "node_0,node_1":[6.0,1],
+      "node_2,node_3":[5.0,1],
+      "node_4,L_1":[7.0,1],
+      "L_1,node_5":[7.0,1],
+      "P_1,node_6":[9.0,1],
+      "node_6,node_7":[6.0,1],
+      "node_8,node_9":[5.0,1],
+      "node_9,P_5":[10.0,1],
+      "node_10,L_2":[7.0,1],
+      "L_2,node_11":[7.0,1],
+      "P_2,node_12":[9.0,1],
+      "node_12,node_13":[6.0,1],
+      "node_14,node_15":[5.0,1],
+      "node_15,P_6":[10.0,1],
+      "node_16,L_3":[7.0,1],
+      "L_3,node_17":[7.0,1],
+      "P_3,node_18":[9.0,1],
+      "node_18,node_19":[6.0,1],
+      "node_20,node_21":[5.0,1],
+      "node_21,P_7":[10.0,1],
+      "node_22,L_4":[7.0,1],
+      "L_4,node_23":[7.0,1],
+      "P_4,node_24":[9.0,1],
+      "node_24,node_25":[6.0,1],
+      "node_26,node_27":[5.0,1],
+      "node_27,P_8":[10.0,1],
+      "node_0,d_1":[3.0,1],
+      "node_6,node_0":[17.0,2],
+      "node_12,node_6":[18.0,2],
+      "node_18,node_12":[18.0,2],
+      "node_24,node_18":[18.0,2],
+      "node_4,node_1":[8.0,1],
+      "node_7,node_4":[9.0,1],
+      "node_10,node_7":[9.0,1],
+      "node_13,node_10":[9.0,1],
+      "node_16,node_13":[9.0,1],
+      "node_19,node_16":[9.0,1],
+      "node_22,node_19":[9.0,1],
+      "node_25,node_22":[9.0,1],
+      "node_5,node_2":[8.0,1],
+      "node_8,node_5":[9.0,1],
+      "node_11,node_8":[9.0,1],
+      "node_14,node_11":[9.0,1],
+      "node_17,node_14":[9.0,1],
+      "node_20,node_17":[9.0,1],
+      "node_23,node_20":[9.0,1],
+      "node_26,node_23":[9.0,1],
+      "node_3,d_2":[3.0,1],
+      "node_9,node_3":[17.0,2],
+      "node_15,node_9":[18.0,2],
+      "node_21,node_15":[18.0,2],
+      "node_27,node_21":[18.0,2],
+      "node_1,node_0":[6.0,1],
+      "node_3,node_2":[5.0,1],
+      "L_1,node_4":[7.0,1],
+      "node_5,L_1":[7.0,1],
+      "node_6,P_1":[9.0,1],
+      "node_7,node_6":[6.0,1],
+      "node_9,node_8":[5.0,1],
+      "P_5,node_9":[10.0,1],
+      "L_2,node_10":[7.0,1],
+      "node_11,L_2":[7.0,1],
+      "node_12,P_2":[9.0,1],
+      "node_13,node_12":[6.0,1],
+      "node_15,node_14":[5.0,1],
+      "P_6,node_15":[10.0,1],
+      "L_3,node_16":[7.0,1],
+      "node_17,L_3":[7.0,1],
+      "node_18,P_3":[9.0,1],
+      "node_19,node_18":[6.0,1],
+      "node_21,node_20":[5.0,1],
+      "P_7,node_21":[10.0,1],
+      "L_4,node_22":[7.0,1],
+      "node_23,L_4":[7.0,1],
+      "node_24,P_4":[9.0,1],
+      "node_25,node_24":[6.0,1],
+      "node_27,node_26":[5.0,1],
+      "P_8,node_27":[10.0,1]
+    }
+}
