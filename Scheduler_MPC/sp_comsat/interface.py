@@ -1,4 +1,6 @@
 from Compo_slim import Compo_slim
+import json
+import os
 
 ###################### HERE IS WHERE THE ACTUAL TESTING STARTS ######################
 
@@ -8,7 +10,14 @@ problem = 'PlantNoHubs'
 
 print(f'Problem: {problem}')
 
-instance,optimum,running_time,len_previous_routes,paths_changed, _ = Compo_slim(problem)
+instance,optimum,running_time,len_previous_routes,paths_changed, solution = Compo_slim(problem)
+
+thisDir = os.getcwd()
+oneStepUp = '/'.join(thisDir.split('/')[:-1])
+
+with open(f"{oneStepUp}/MPC_input.json",'w') as logfile:
+    json.dump(solution,logfile,indent=4)
+
 
 ################## A BUNCH OF STUFF TO MAKE THINGS INTERACTIVE #####################
 

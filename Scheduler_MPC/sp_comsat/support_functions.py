@@ -1,5 +1,6 @@
 import json
 import networkx as nx
+import matplotlib.pyplot as plt
 import csv
 from itertools import islice
 from classes import Path
@@ -63,6 +64,27 @@ def make_graph(nodes,edges):
     }
     return graph
 
+def print_graph(nodes,edges):
+    nodes_dict = {
+        i: {
+            'pos': [j['x'],j['y']],
+            'next': j['next']}
+        for i,j in nodes.items()
+    }
+
+    G = nx.Graph()
+
+    for i in nodes_dict:
+        G.add_node(i)
+
+    nx.set_node_attributes(G, nodes_dict)
+
+    for i in edges:
+        G.add_edge(i.split(',')[0],i.split(',')[1])
+
+    nx.draw(G,nx.get_node_attributes(G,'pos'), with_labels=True)
+    plt.show()
+
 def json_parser(file_to_parse,monolithic = False):
     with open(file_to_parse,'r') as read_file:
         data = json.load(read_file)
@@ -107,9 +129,7 @@ def json_parser(file_to_parse,monolithic = False):
         )
     edges = {f"{i},{j}":[math.dist((node['x'],node['y']),
                                    (nodes[j]['x'],nodes[j]['y'])),2] for i,node in nodes.items() for j in node['next']}
-    # edges = data['edges']
-    # edges = {
-    #     (i.split(',')[0],i.split(',')[1]):buffer[i] for i in buffer}
+
     if monolithic == False:
         return jobs,nodes,edges,Autonomy,ATRs,charging_coefficient,Big_number,hub_nodes
     else:
@@ -145,68 +165,5 @@ def paths_formatter(current_paths,current_routes):
         for first, second in zip(paths_combo[route][pair].path_nodes[:-1], paths_combo[route][pair].path_nodes[1:])
     ]
 
-    # paths_combo_edges = {
-    #     route: {
-    #         pair:
-    #             [(first, second)
-    #
-    #              for first, second in zip(paths_combo[route][pair][:-1], paths_combo[route][pair][1:])]
-    #         for pair_index, pair in enumerate(paths_combo[route])
-    #     }
-    #     for route_index, route in enumerate(paths_combo)
-    # }
-
     return shortest_paths_solution, paths_combo
-
-########## THE FOLLOWING STUFF IS TO EMBED COMSAT IN SEQUENCE PLANNER ###########
-
-def make_Sequence_Planner_json(node_sequence, current_routes):
-    the_dict = {'robots': []}
-    for route1 in current_routes:
-        path = []
-        for path_elem_index1, path_elem1 in enumerate(route1.nodes):
-            pair_buffer = []
-            for route2 in current_routes:
-                for path_elem_index2, path_elem2 in enumerate(route2.nodes):
-                    if (route2.vehicle.id, path_elem2) in [(i[0], node_sequence[i][0]) for i in node_sequence] \
-                            and route1.vehicle.id != route2.vehicle.id \
-                            and path_elem2 == path_elem1 \
-                            and float(str(node_sequence[(route2.vehicle.id, path_elem_index2)][1])) \
-                            < \
-                            float(str(node_sequence[(route1.vehicle.id, path_elem_index1)][1])):
-                        pair_buffer.append((route2.vehicle.id, path_elem_index2))
-                        # print(robot2, path_elem2, path_elem_index2)
-
-            if len(pair_buffer) > 0:
-                path.append({
-                    'name': path_elem1,
-                    'pre': [{
-                        "name":[i for i in pair_buffer
-                            if float(str(node_sequence[i][1])) == max([float(str(node_sequence[i][1]))
-                                                                     for i in pair_buffer])][0][0],
-                        "index": [i for i in pair_buffer
-                                 if float(str(node_sequence[i][1])) == max([float(str(node_sequence[i][1]))
-                                                                          for i in pair_buffer])][0][1]
-                    }]
-                })
-            else:
-                path.append({
-                    'name': path_elem1,
-                    'pre': []
-
-                })
-        the_dict['robots'].append({
-            'name': route1.vehicle.id,
-            'path': path
-
-        })
-
-    # print('########## THE DICT ############')
-    # for i in the_dict:
-    #     print(i, the_dict[i])
-
-    with open('./output/scheduler_result.json', 'w') as write_file:
-        json.dump(the_dict, write_file, indent=4)
-
-
 

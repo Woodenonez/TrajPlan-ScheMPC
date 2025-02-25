@@ -378,26 +378,6 @@ def routing(the_instance, previous_routes = []):
             for elem in actual_nodes
         }
 
-        # finally the list of routes:
-        # routes_plus = {
-        #     route:(
-        #         # 0 actual nodes of the route
-        #         actual_nodes[route][0],
-        #         # 1 actual edges
-        #         actual_nodes_2[route],
-        #         # 2 time window by node
-        #         actual_nodes[route][1],
-        #         # 3 service time by node
-        #         actual_nodes[route][2],
-        #         # 4 sequence of tasks
-        #         routes[route],
-        #         # 5 route length in distance
-        #         routes_length[route][-1],
-        #         # 6 charging time by node
-        #         actual_nodes[route][3]
-        #     )
-        #     for route in routes
-        # }
         for route in routes:
             routes_plus.append(
                 Route(
@@ -413,35 +393,6 @@ def routing(the_instance, previous_routes = []):
             )
     else:
         routing_feasibility = unsat
-    # I AM RESTRUCTURING EVERYTHING SO I HOPE I WILL NOT NEED THIS....WE'LL SEE
-    # locations_plus = {}
-    # for j in routes_plus:
-    #     locations_plus.update({
-    #         j: {
-    #             (tasks[task1], tasks[task2]):
-    #                 {
-    #                     'TW': ['None' if i != tasks[task2]
-    #                            else jobs['_'.join(task2.split('_')[:-1])]['tasks'][task2.split('_')[-1]]['TW']
-    #                            for i in current_path[(task1, task2)]
-    #                            ],
-    #                     'St': [0 if i != tasks[task1]
-    #                            else jobs['_'.join(task1.split('_')[:-1])]['tasks'][task1.split('_')[-1]]['Service']
-    #                            for i in current_path[(task1, task2)]
-    #                            ],
-    #                     'Ct': [0 if i != tasks[task2] or task2.split('_')[0] != 'recharge'
-    #                            else math.ceil((1 / charging_coefficient) \
-    #                                 *\
-    #                                 (Autonomy - round(m.getVarByName('autonomy_left[{},{}]'.format(j, task2)).X)))
-    #                            for i in current_path[(task1, task2)]
-    #                            ]
-    #                 }
-    #             for task1, task2 in zip(routes_plus[j][4][:-1], routes_plus[j][4][1:])
-    #         }
-    #     })
-    #
-    # print('-- LOCATION PLUS --')
-    # for i in locations_plus:
-    #     print(i, locations_plus[i])
 
     return routing_feasibility, routes_plus, current_solution
 

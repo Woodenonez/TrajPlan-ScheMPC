@@ -1,7 +1,7 @@
 from z3 import *
 import networkx as nx
-# import matplotlib.pyplot as plt
-from support_functions import json_parser, paths_formatter
+import matplotlib.pyplot as plt
+from support_functions import json_parser, paths_formatter, print_graph
 from time import time as tm
 from classes import Task, Instance, ATR
 import math
@@ -32,9 +32,7 @@ def Compo_slim(problem):
     # for i in nodes:
     #     print(i)
     ########### In case I want to plot the graph ############
-    # nx.draw(graph,with_labels = True)
-    # plt.show()
-    # print("The Graph is strongly connected...",nx.is_strongly_connected(graph))
+    # print_graph(nodes,edges)
 
     The_Instance = Instance(
         problem,
@@ -259,6 +257,13 @@ def Compo_slim(problem):
         # for i in edge_sequence:
         #     print(i)
 
-    return instance,optimum,running_time,len(previous_routes),paths_changed, [node_sequence,current_routes]
+        solution = {
+            i:[(value[0],float(value[1])) for key,value in node_sequence.items() if key[0] == i ]
+            for i in ATRs
+        }
+    else:
+        solution = {}
+
+    return instance,optimum,running_time,len(previous_routes),paths_changed, solution
 
 
