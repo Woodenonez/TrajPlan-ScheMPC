@@ -7,7 +7,7 @@ vehicle_margin: 0.2  # Vehicle extra safe margin
 social_margin: 0.2   # Vehicle extra social margin for soft loss terms
 
 ### Robot Specification (kinematic parameters)
-lin_vel_min: -0.5    # Vehicle contraint on the minimal velocity possible
+lin_vel_min: -0.1    # Vehicle contraint on the minimal velocity possible
 lin_vel_max: 1.5     # Vehicle contraint on the maximal velocity possible
 lin_acc_min: -1      # Vehicle contraint on the maximal linear retardation
 lin_acc_max: 1       # Vehicle contraint on the maximal linear acceleration

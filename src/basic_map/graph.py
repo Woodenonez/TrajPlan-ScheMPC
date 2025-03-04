@@ -66,22 +66,22 @@ class NetGraph(nx.Graph):
         return nodelist
     
     
-    def plot(self, ax: Axes, node_style='x', node_text:bool=True, edge_color='r'):
-        self.plot_graph(ax, node_style, node_text, edge_color)
+    def plot(self, ax: Axes, node_style='x', node_text:bool=True, edge_color='r', alpha=1.0):
+        self.plot_graph(ax, node_style, node_text, edge_color, alpha)
 
-    def plot_graph(self, ax: Axes, node_style='x', node_text:bool=True, edge_color='r'):
+    def plot_graph(self, ax: Axes, node_style='x', node_text:bool=True, edge_color='r', alpha=1.0):
         if node_style is not None:
-            self.plot_graph_nodes(ax, node_style, node_text)
+            self.plot_graph_nodes(ax, node_style, node_text, alpha)
         if edge_color is not None:
-            self.plot_graph_edges(ax, edge_color)
+            self.plot_graph_edges(ax, edge_color, alpha)
 
-    def plot_graph_nodes(self, ax: Axes, style='x', with_text=True):
-        [ax.plot(self.get_node_coord(n)[0], self.get_node_coord(n)[1], style) for n in list(self.nodes)]
+    def plot_graph_nodes(self, ax: Axes, style='x', with_text=True, alpha=1.0):
+        [ax.plot(self.get_node_coord(n)[0], self.get_node_coord(n)[1], style, alpha=alpha) for n in list(self.nodes)]
         if with_text:
-            [ax.text(self.get_node_coord(n)[0], self.get_node_coord(n)[1], n) for n in list(self.nodes)]
+            [ax.text(self.get_node_coord(n)[0], self.get_node_coord(n)[1], n, alpha=alpha) for n in list(self.nodes)]
 
-    def plot_graph_edges(self, ax: Axes, edge_color='r'):
-        nx.draw_networkx_edges(self, nx.get_node_attributes(self, self._position_key), ax=ax, edge_color=edge_color)
+    def plot_graph_edges(self, ax: Axes, edge_color='r', alpha=1.0):
+        nx.draw_networkx_edges(self, nx.get_node_attributes(self, self._position_key), ax=ax, edge_color=edge_color, alpha=alpha)
 
 
 

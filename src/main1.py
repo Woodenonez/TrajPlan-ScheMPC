@@ -17,8 +17,9 @@ from configs import CircularRobotSpecification
 from visualizer.object import CircularVehicleVisualizer
 from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
-DATA_NAME = "schedule_demo1_data" # "test_data" or "schedule_demo1_data"
-CFG_FNAME = "mpc_default.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
+DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
+CFG_FNAME = "mpc_fast.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
+MAP_ONLY = True
 AUTORUN = False # if false, press key (in the plot window) to continue
 MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
 VERBOSE = False
@@ -69,15 +70,20 @@ for rid in robot_ids:
     robot_manager.add_schedule(rid, np.asarray(robot_starts[str(rid)]), path_coords, path_times)
 
 ### Run
-main_plotter = MpcPlotInLoop(config_robot)
-main_plotter.plot_in_loop_pre(gpc.current_map, gpc.inflated_map, gpc.current_graph)
-color_list = ["b", "r", "g"]
+main_plotter = MpcPlotInLoop(config_robot, map_only=MAP_ONLY)
+# main_plotter.plot_in_loop_pre(gpc.current_map, gpc.inflated_map, gpc.current_graph)
+main_plotter.plot_in_loop_pre(gpc.current_map, graph_manager=gpc.current_graph)
+color_list = [
+    "#0072B2", "#D55E00", "#009E73", "#F0E442", "#56B4E9", 
+    "#E69F00", "#CC79A7", "#0072B2", "#D55E00", "#009E73", 
+    "#F0E442", "#56B4E9", "#E69F00", "#CC79A7"
+]
 for i, rid in enumerate(robot_ids):
     planner = robot_manager.get_planner(rid)
     controller = robot_manager.get_controller(rid)
     visualizer = robot_manager.get_visualizer(rid)
     main_plotter.add_object_to_pre(rid,
-                                   planner.ref_traj,
+                                   None, #planner.ref_traj,
                                    controller.state,
                                    controller.final_goal,
                                    color=color_list[i])
@@ -110,7 +116,7 @@ for kt in range(TIMEOUT):
         robot.step(actions[-1])
         robot_manager.set_pred_states(rid, np.asarray(pred_states))
 
-        main_plotter.update_plot(rid, kt, actions[-1], robot.state, debug_info['cost'], np.asarray(pred_states), current_refs)
+        main_plotter.update_plot(rid, kt, actions[-1], None, debug_info['cost'], np.asarray(pred_states), current_refs)
         visualizer.update(*robot.state)
 
         if not controller.check_termination_condition(external_check=planner.idle):
