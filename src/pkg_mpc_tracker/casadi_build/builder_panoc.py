@@ -147,7 +147,7 @@ class PanocBuilder:
         ### Reference deviation costs
         cts.cost_rpd = mc.cost_refpath_deviation(state, ref_states[:2, :], weight=pts['rpd'])
         cts.cost_rvd = pts['vel'] * (action[0]-ref_speed)**2
-        cts.cost_rtd = 0.0
+        cts.cost_rtd = pts['theta'] * (state[2]-ref_states[2, 0])**2
         cts.cost_input = ca.sum1(ca.vertcat(pts['v'], pts['w']) * action**2) 
 
         ### Fleet collision avoidance

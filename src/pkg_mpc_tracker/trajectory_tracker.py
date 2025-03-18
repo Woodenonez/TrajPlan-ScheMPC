@@ -260,7 +260,7 @@ class TrajectoryTracker:
             self.tuning_params = [self.config.qpos, self.config.qvel, self.config.qtheta, self.config.lin_vel_penalty, self.config.ang_vel_penalty,
                                   self.config.qpN, self.config.qthetaN, self.config.qrpd, self.config.lin_acc_penalty, self.config.ang_acc_penalty]
             self.tuning_params = [x*0.1 for x in self.tuning_params]
-            self.tuning_params[2] = max(self.tuning_params) * 100
+            self.tuning_params[2] = 100
         else:
             self.tuning_params = [self.config.qpos, self.config.qvel, self.config.qtheta, self.config.lin_vel_penalty, self.config.ang_vel_penalty,
                                   self.config.qpN, self.config.qthetaN, self.config.qrpd, self.config.lin_acc_penalty, self.config.ang_acc_penalty]
@@ -405,15 +405,21 @@ class TrajectoryTracker:
 
         ### Complementary restrictions for velocity and angular velocity ###
         # speed_decay = 0.0
-        # current_ref_theta = math.degrees(ref_states[0, 2]) % 360
-        # current_theta = math.degrees(self.state[2]) % 360
+        current_ref_theta = math.degrees(ref_states[0, 2]) % 360
+        current_theta = math.degrees(self.state[2]) % 360
+        theta_diff = abs(current_ref_theta - current_theta)
+        if theta_diff > 180:
+            theta_diff = 360 - theta_diff
         # if (theta_diff := (abs(current_ref_theta - current_theta) % 180)) > 120:
         #     self.set_work_mode(mode='aligning')
         # elif theta_diff > 60:
         #     speed_decay = min(max(theta_diff/180, 0.0), 1.0)
         #     self.set_work_mode(mode='work', use_predefined_speed=False)
-        # else:
-        self.set_work_mode(mode='work', use_predefined_speed=False)
+        
+        if theta_diff > 90:
+            self.set_work_mode(mode='aligning')
+        else:
+            self.set_work_mode(mode='work', use_predefined_speed=False)
             
         ### Assemble parameters for solver & Run MPC###
         params = list(last_u) + list(self.state) + list(finish_state) + self.tuning_params + \
