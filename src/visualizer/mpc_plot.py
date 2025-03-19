@@ -13,9 +13,9 @@ from matplotlib.lines import Line2D
 from matplotlib.gridspec import GridSpec
 
 from matplotlib.axes import Axes
-from configs import CircularRobotSpecification
-from basic_map.map_geometric import GeometricMap
-from basic_map.graph import NetGraph
+from src.configs import CircularRobotSpecification
+from src.basic_map.map_geometric import GeometricMap
+from src.basic_map.graph import NetGraph
 
 
 def figure_formatter(window_title:str, num_axes_per_column:list=None, num_axes_per_row:list=None, figure_size:tuple=None):

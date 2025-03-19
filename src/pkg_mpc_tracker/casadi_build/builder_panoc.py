@@ -7,7 +7,7 @@ from opengen import opengen as og # type: ignore # or "import opengen as og"
 from . import mpc_helper as mh
 from . import mpc_cost as mc
 
-from configs import MpcConfiguration, CircularRobotSpecification
+from src.configs import MpcConfiguration, CircularRobotSpecification
 
 
 class PenaltyTerms(TypedDict):

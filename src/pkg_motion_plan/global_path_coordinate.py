@@ -6,10 +6,10 @@ from matplotlib.axes import Axes # type: ignore
 
 from .path_plan_graph import dijkstra
 
-from basic_map.graph import NetGraph
-from basic_map.map_geometric import GeometricMap
-from basic_map.map_occupancy import OccupancyMap
-from basic_obstacle.geometry_plain import PlainPolygon
+from src.basic_map.graph import NetGraph
+from src.basic_map.map_geometric import GeometricMap
+from src.basic_map.map_occupancy import OccupancyMap
+from src.basic_obstacle.geometry_plain import PlainPolygon
 
 
 PathNode = tuple[float, float]

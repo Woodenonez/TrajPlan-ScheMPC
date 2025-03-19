@@ -1,9 +1,10 @@
 from Scheduler_MPC.sp_comsat.Compo_slim import Compo_slim
+from src.main1 import run_mpc
 import json
 import csv
 
-# problem = 'PlantNoHubs'
-problem = 'OneVehicle'
+problem = 'PlantNoHubs'
+# problem = 'OneVehicle'
 
 # run the scheduler from the
 instance,optimum,running_time,len_previous_routes,paths_changed, solution = Compo_slim(problem)
@@ -23,11 +24,11 @@ with open('data/schedule_demo2_data/schedule.csv', mode="w", newline="") as csv_
     for robot_id, nodes in solution.items():
         for node_id, eta in nodes:
             csv_writer.writerow([robot_id, node_id, eta])
-
+# load vehicles starting nodes from json
 with open(f'data/test_cases/{problem}.json','r') as read_file:
     data = json.load(read_file)
     ATRs = data['ATRs']
-
+# create a dict with vehicles starting coordinates
 robot_starts = {
     key:[
         data['test_data']['nodes'][value]['x'],
@@ -36,6 +37,9 @@ robot_starts = {
     ]
     for key,value in ATRs.items()
 }
-
+# upload json file for the MPC
 with open('data/schedule_demo2_data/robot_start.json','w') as write_file:
     json.dump(robot_starts,write_file,indent=4)
+
+# run the MPC
+run_mpc()
