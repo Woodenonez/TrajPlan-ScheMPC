@@ -1,9 +1,8 @@
 import json
 import networkx as nx
 import matplotlib.pyplot as plt
-import csv
 from itertools import islice
-from classes import Path
+from Scheduler_MPC.sp_comsat.classes import Path
 import math
 import collections
 import itertools

@@ -122,11 +122,15 @@ edges = [
     ['N270','P8'],['P8','P82'],['P82','P84'],['P84','P83'],['P83','P8'],
 ]
 
-min_x = min([i[0] for i in nodes.values()])
-max_x = max([i[0] for i in nodes.values()])
-min_y = min([i[1] for i in nodes.values()])
-max_y = max([i[1] for i in nodes.values()])
-print(f'min_x:{min_x}, max_x:{max_x}, min_y:{min_y}, max_y:{max_y}')
+# min_x = min([i[0] for i in nodes.values()])
+# max_x = max([i[0] for i in nodes.values()])
+# min_y = min([i[1] for i in nodes.values()])
+# max_y = max([i[1] for i in nodes.values()])
+# print(f'min_x:{min_x}, max_x:{max_x}, min_y:{min_y}, max_y:{max_y}')
+
+edges_rev = [[i[1],i[0]] for i in edges]
+
+edges += edges_rev
 
 nodes_dict = {
     i:{
@@ -142,17 +146,23 @@ for e in edges:
     G.add_edge(e[0], e[1])
 nx.set_node_attributes(G, nodes_dict)
 
-fig, ax = plt.subplots()
+for node,coord in nodes.items():
+    print(f'\"{node}\":{{\"x\":{coord[0]},\"y\":{coord[1]},\"next\":{nodes_dict[node]["next"]}}},')
 
-ax.plot(np.array(boundary+[boundary[0]])[:,0], np.array(boundary+[boundary[0]])[:,1], 'r-')
-for obs in obstacle_list:
-    ax.add_patch(Polygon(obs, closed=True, fill=True, color='gray'))
+for i in edges:
+    print(f'\"{i[0]},{i[1]}\":[{round(math.dist((nodes[i[0]]),(nodes[i[1]])))},1],')
 
-nx.draw(G, nx.get_node_attributes(G,'pos'), ax=ax, with_labels=True)
-for tx, pos in nodes.items():
-    ax.text(pos[0], pos[1]-2, f'{pos}')
-ax.set_aspect('equal')
-ax.grid(True, which='both')
-ax.set_axis_on()
+# fig, ax = plt.subplots()
+
+# ax.plot(np.array(boundary+[boundary[0]])[:,0], np.array(boundary+[boundary[0]])[:,1], 'r-')
+# for obs in obstacle_list:
+#     ax.add_patch(Polygon(obs, closed=True, fill=True, color='gray'))
+#
+# nx.draw(G, nx.get_node_attributes(G,'pos'), ax=ax, with_labels=True)
+# for tx, pos in nodes.items():
+#     ax.text(pos[0], pos[1]-2, f'{pos}')
+# ax.set_aspect('equal')
+# ax.grid(True, which='both')
+# ax.set_axis_on()
 
 plt.show()

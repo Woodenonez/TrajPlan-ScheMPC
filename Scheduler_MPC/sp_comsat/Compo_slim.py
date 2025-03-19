@@ -1,15 +1,15 @@
 from z3 import *
 import networkx as nx
-import matplotlib.pyplot as plt
-from support_functions import json_parser, paths_formatter, print_graph
+# import matplotlib.pyplot as plt
+from Scheduler_MPC.sp_comsat.support_functions import json_parser, paths_formatter, print_graph
 from time import time as tm
-from classes import Task, Instance, ATR
-import math
+from Scheduler_MPC.sp_comsat.classes import Task, Instance, ATR
+# import math
 ###### The sub-problems algorithms #########
-from E_Routing_Gurobi import routing
-from scheduling_model import schedule
-from path_changer_Gurobi import changer
-from route_checker_slim import routes_checking
+from Scheduler_MPC.sp_comsat.E_Routing_Gurobi import routing
+from Scheduler_MPC.sp_comsat.scheduling_model import schedule
+from Scheduler_MPC.sp_comsat.path_changer_Gurobi import changer
+from Scheduler_MPC.sp_comsat.route_checker_slim import routes_checking
 import math
 def Compo_slim(problem):
 
@@ -20,7 +20,7 @@ def Compo_slim(problem):
 
     # first of all, let's parse the json file with the plant layout and the tasks info
     jobs, nodes, edges, Autonomy, ATRs, charging_coefficient,Big_Number,hubs\
-        = json_parser('test_cases/%s.json' % problem)
+        = json_parser(f'data/test_cases/{problem}.json')
     # now let's build the graph out of nodes and edges
     graph = nx.DiGraph()
 

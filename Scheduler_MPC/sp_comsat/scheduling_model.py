@@ -1,5 +1,5 @@
 from z3 import *
-from classes import Route
+from Scheduler_MPC.sp_comsat.classes import Route
 def schedule(the_instance, current_routes):
     # i can now start building the model in z3. i am going to treat this part as a standard job shop problem
     # where each node/edge is a resource, each route a job and the nodes to visit are operations.
