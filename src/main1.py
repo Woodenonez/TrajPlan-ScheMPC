@@ -25,7 +25,7 @@ def run_mpc():
     AUTORUN = True # if false, press key (in the plot window) to continue
     MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = False
-    TIMEOUT = 1000
+    TIMEOUT = 3000
 
     root_dir = pathlib.Path(__file__).resolve().parents[1]
     data_dir = os.path.join(root_dir, "data", DATA_NAME)

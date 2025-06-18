@@ -247,12 +247,12 @@ def Compo_slim(problem):
         optimum = sum([i.length for i in current_routes])
         print('         travelling distance: ',round(optimum,2))
 
-        print('CURRENT ROUTES - WHEN THE INSTANCE IS SOLVED')
-        for i in current_routes:
-            print(i.display())
-        print('##########################################')
-        for i in node_sequence:
-            print('{} visits node {} at time {}'.format(i[0],node_sequence[i][0],node_sequence[i][1]))
+        # print('CURRENT ROUTES - WHEN THE INSTANCE IS SOLVED')
+        # for i in current_routes:
+        #     print(i.display())
+        # print('##########################################')
+        # for i in node_sequence:
+        #     print('{} visits node {} at time {}'.format(i[0],node_sequence[i][0],node_sequence[i][1]))
             # print(i,node_sequence[i])
         # for i in edge_sequence:
         #     print(i)

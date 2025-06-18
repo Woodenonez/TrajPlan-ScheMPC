@@ -146,18 +146,18 @@ for e in edges:
     G.add_edge(e[0], e[1])
 nx.set_node_attributes(G, nodes_dict)
 
-for node,coord in nodes.items():
-    print(f'\"{node}\":{{\"x\":{coord[0]},\"y\":{coord[1]},\"next\":{nodes_dict[node]["next"]}}},')
+# for node,coord in nodes.items():
+#     print(f'\"{node}\":{{\"x\":{coord[0]},\"y\":{coord[1]},\"next\":{nodes_dict[node]["next"]}}},')
 
-for i in edges:
-    print(f'\"{i[0]},{i[1]}\":[{round(math.dist((nodes[i[0]]),(nodes[i[1]])))},1],')
+# for i in edges:
+#     print(f'\"{i[0]},{i[1]}\":[{round(math.dist((nodes[i[0]]),(nodes[i[1]])))},1],')
 
-# fig, ax = plt.subplots()
-
+fig, ax = plt.subplots()
+#
 # ax.plot(np.array(boundary+[boundary[0]])[:,0], np.array(boundary+[boundary[0]])[:,1], 'r-')
 # for obs in obstacle_list:
 #     ax.add_patch(Polygon(obs, closed=True, fill=True, color='gray'))
-#
+
 # nx.draw(G, nx.get_node_attributes(G,'pos'), ax=ax, with_labels=True)
 # for tx, pos in nodes.items():
 #     ax.text(pos[0], pos[1]-2, f'{pos}')

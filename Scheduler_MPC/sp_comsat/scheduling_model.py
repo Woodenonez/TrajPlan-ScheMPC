@@ -26,7 +26,7 @@ def schedule(the_instance, current_routes):
     ### COMMENT THIS ON (AND THE LINE IN CONSTRAINT one_node_at_a_time TO ALLOW HUB NODES #####
     # hubs = [i.depot for i in idle_atrs]
 
-
+    SafetyCoefficient = 30
 
     # a variable for each node (operation) of each route (job)
     visit_node = [[Real('vehicle_%s_VISITS_node_%s' % (i.vehicle, j_index))
@@ -125,8 +125,8 @@ def schedule(the_instance, current_routes):
     # two operations cannot use the same node at the same time (unless the node is a hub)
     one_node_at_a_time = [
         Or(
-            visit_node[i1][j1] >= leave_node[i2][j2] + 1,
-            visit_node[i2][j2] >= leave_node[i1][j1] + 1
+            visit_node[i1][j1] >= leave_node[i2][j2] + 1 * SafetyCoefficient,
+            visit_node[i2][j2] >= leave_node[i1][j1] + 1 * SafetyCoefficient
         )
         for i1, route1 in enumerate(routes_plus_idle)
         for j1, node1 in enumerate(route1.nodes)
@@ -141,8 +141,8 @@ def schedule(the_instance, current_routes):
     # if two operations are going to use the same edge (from the same side), they cannot start at the same time
     edges_direct = [
         Or(
-            visit_edge[i1][j1] >= visit_edge[i2][j2] + 1,
-            visit_edge[i2][j2] >= visit_edge[i1][j1] + 1,
+            visit_edge[i1][j1] >= visit_edge[i2][j2] + 1 * SafetyCoefficient,
+            visit_edge[i2][j2] >= visit_edge[i1][j1] + 1 * SafetyCoefficient,
         )
 
         for i1, route1 in enumerate(routes_plus_idle)
@@ -151,14 +151,14 @@ def schedule(the_instance, current_routes):
         for j2, edge2 in enumerate(route2.edges)
         if route1 != route2
         and edge1 == edge2
-        and the_instance.graph.get_edge_data(*edge1)['capacity'] == 1
+        # and the_instance.graph.get_edge_data(*edge1)['capacity'] == 1
 
     ]
 
     edges_inverse = [
         Or(
-            visit_edge[i1][j1] >= visit_edge[i2][j2] + the_instance.graph.get_edge_data(*edge2)['weight'],
-            visit_edge[i2][j2] >= visit_edge[i1][j1] + the_instance.graph.get_edge_data(*edge1)['weight'],
+            visit_edge[i1][j1] >= visit_edge[i2][j2] + the_instance.graph.get_edge_data(*edge2)['weight'] + SafetyCoefficient,
+            visit_edge[i2][j2] >= visit_edge[i1][j1] + the_instance.graph.get_edge_data(*edge1)['weight'] + SafetyCoefficient,
         )
         for i1, route1 in enumerate(routes_plus_idle)
         for j1, edge1 in enumerate(route1.edges)
@@ -166,15 +166,23 @@ def schedule(the_instance, current_routes):
         for j2, edge2 in enumerate(route2.edges)
         if route1 != route2
         and edge1[0] == edge2[1] and edge1[1] == edge2[0]
-        and the_instance.graph.get_edge_data(*edge1)['capacity'] == 2
+        # and the_instance.graph.get_edge_data(*edge1)['capacity'] == 1
     ]
 
-
+    delayed_start = [
+        And([
+            Abs(visit_node[i][2] - visit_node[j][2]) > 20
+            for j, route_j in enumerate(routes_plus_idle)
+            if j != i and route_j.length > 1
+        ])
+        for i, route_i in enumerate(routes_plus_idle)
+        if route_i.length > 0
+    ]
 
     # HERE I BUILD UP THE MODEL FOR THE SCHEDULING PROBLEM
     set_option(rational_to_decimal=True)
     set_option(precision=2)
-    scheduling = Optimize()
+    scheduling = Solver()
 
     # ASSERT THE CONSTRAINTS...
     scheduling.add(
@@ -187,16 +195,38 @@ def schedule(the_instance, current_routes):
         staying_at_a_node +
         one_node_at_a_time +
         edges_direct +
-        edges_inverse
+        edges_inverse +
+        delayed_start
     )
 
-    ############ THIS I NEED ONLY WHEN I SCHEDULE FOR SEQUENCE PLANNER ###############
-    scheduling.minimize(Sum([
-        visit_node[i_index][j]
-        for i_index, i in enumerate(routes_plus_idle)
-        for j, _ in enumerate(i.nodes)
-
-    ]))
+    # scheduling.minimize(
+    #     # penalize vehicles from getting to the goal later/earlier than in the middle
+    #     # of the time window
+    #     # Sum([
+    #     #     Abs(visit_node[i_index][j_index] - ((j[1] - j[0])/2) )
+    #     #     for i_index, i in enumerate(routes_plus_idle)
+    #     #     for j_index, j in enumerate(i.TW)
+    #     #     if j != []
+    #     # ])
+    #     # +
+    #     # discourage vehicels from waiting at nodes
+    #     Sum([
+    #         (leave_node[i_index][j] - visit_node[i_index][j])
+    #         for i_index, i in enumerate(routes_plus_idle)
+    #         for j, _ in enumerate(i.nodes)
+    #         if j != 0 and j != len(i.nodes)
+    #     ])
+    #     # -
+    #     # encourage delay between vehicles start
+    #     # 1000*Sum([delayed_start[i] for i in range(len(routes_plus_idle))])
+    #     +
+    #     # encourage vehicle to be as fast as possible
+    #     Sum([
+    #     visit_node[i_index][j]
+    #     for i_index, i in enumerate(routes_plus_idle)
+    #     for j, _ in enumerate(i.nodes)
+    #     ])
+    # )
 
     nodes_schedule = {}
     edges_schedule = []
@@ -204,13 +234,10 @@ def schedule(the_instance, current_routes):
     if scheduling_feasibility == sat:
         m3 = scheduling.model()
         for i_index, i in enumerate(routes_plus_idle):
+            # print(f'delay {i_index}:',m3[delayed_start[i_index]])
             for j_index, j in enumerate(i.nodes):
                 # print(j_index)
                 nodes_schedule.update(
-                    # (
-                    #     'vehicle_%s_visits_node_%s: ' % (i, j),
-                    #     m3[visit_node[i_index][j_index]]
-                    # )
                 {
                     (i.vehicle.id ,j_index):(j, str(m3[visit_node[i_index][j_index]]).replace('?',''))
                 }
