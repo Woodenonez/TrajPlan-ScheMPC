@@ -112,9 +112,9 @@ class MpcPlotInLoop:
             dpi = self.save_params['dpi']
 
         if map_only:
-            self.fig, self.map_ax = plt.subplots()
+            self.fig, self.map_ax = plt.subplots(figsize=(10, 8), dpi=dpi)
         else:
-            self.fig, self.gs, axis_format = figure_formatter('PlotInLoop', [3,1])
+            self.fig, self.gs, axis_format = figure_formatter('PlotInLoop', [3,1], figure_size=(16, 8), dpi=dpi)
 
             self.vel_ax  :Axes = axis_format[0][0]
             self.omega_ax:Axes = axis_format[0][1]
