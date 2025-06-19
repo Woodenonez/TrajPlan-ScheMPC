@@ -1,6 +1,7 @@
 import os
 import json
 import pathlib
+import datetime
 
 import numpy as np
 
@@ -26,6 +27,8 @@ def run_mpc():
     MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = False
     TIMEOUT = 3000
+
+    save_video_path = f'./Demo/{DATA_NAME}_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.mp4'
 
     root_dir = pathlib.Path(__file__).resolve().parents[1]
     data_dir = os.path.join(root_dir, "data", DATA_NAME)
@@ -72,7 +75,7 @@ def run_mpc():
         robot_manager.add_schedule(rid, np.asarray(robot_starts[str(rid)]), path_coords, path_times)
 
     ### Run
-    main_plotter = MpcPlotInLoop(config_robot, map_only=MAP_ONLY)
+    main_plotter = MpcPlotInLoop(config_robot, map_only=MAP_ONLY, save_to_path=save_video_path, save_params={'skip_frame': 0})
     # main_plotter.plot_in_loop_pre(gpc.current_map, gpc.inflated_map, gpc.current_graph)
     main_plotter.plot_in_loop_pre(gpc.current_map, graph_manager=gpc.current_graph)
     color_list = [

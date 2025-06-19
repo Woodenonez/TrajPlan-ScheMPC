@@ -54,8 +54,8 @@ if __name__ == "__main__":
 
     general_funct(
         problem,
-        scheduler = True,
-        MPC= False
+        scheduler = False,
+        MPC= True
     )
 
 

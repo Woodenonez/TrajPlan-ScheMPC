@@ -18,6 +18,14 @@ from src.basic_map.map_geometric import GeometricMap
 from src.basic_map.graph import NetGraph
 
 
+class SaveParams(TypedDict):
+    fps: int
+    dpi: int
+    codec: str
+    frame_size: tuple[int, int]
+    skip_frame: int
+
+
 def figure_formatter(window_title:str, num_axes_per_column:list=None, num_axes_per_row:list=None, figure_size:tuple=None):
     """ Generate a figure with a given format.
 
@@ -76,19 +84,32 @@ def figure_formatter(window_title:str, num_axes_per_column:list=None, num_axes_p
     return fig, gs, axis_format
 
 class MpcPlotInLoop:
-    def __init__(self, config: CircularRobotSpecification, map_only=False) -> None:
+    def __init__(self, config: CircularRobotSpecification, map_only=False, save_to_path:Optional[str]=None, save_params:Optional[Union[SaveParams, dict]]=None) -> None:
         """
+        Args:
+            config: The configuration of the robot.
+            map_only: If True, only the map will be plotted.
+            save_to_path: If not None, the plot will be saved to the path as a video.
+            save_params: The parameters for saving the plot as a video, such as `fps`, `dpi`, `codec`, `frame_size`, `skip_frame`.
+
+
         Attributes:
             plot_dict_pre   : A dictionary of all plot objects which need to be manually flushed.
             plot_dict_temp  : A dictionary of all plot objects which only exist for one time step.
             plot_dict_inloop: A dictionary of all plot objects which update (append) every time step.
-
+        
         TODO:
             - Methods to flush part of the plot and to destroy an object in case it is not active.
         """
         self.ts    = config.ts
         self.width = config.vehicle_width
         self.map_only = map_only
+        self.init_video_writer(save_to_path, save_params)
+
+        if save_to_path is None:
+            dpi = None
+        else:
+            dpi = self.save_params['dpi']
 
         if map_only:
             self.fig, self.map_ax = plt.subplots()
@@ -110,6 +131,41 @@ class MpcPlotInLoop:
 
     def close(self):
         plt.close(self.fig)
+
+    def init_video_writer(self, save_to_path: Optional[str], save_params: Optional[Union[SaveParams, dict]]):
+        """Initialize the video writer if the path is not None.
+
+        Attributes:
+            save_params: The parameters for saving the plot as a video, such as `fps`, `dpi`, `codec`, `frame_size`, `skip_frame`.
+            video_writer: The video writer object.
+        """
+        default_frame_size = (1280, 960)
+        default_fps = 5
+        default_dpi = 300
+        default_codec = 'MJPG'
+        default_skip_frame = 0 # skip every n frames, 0 means no skip
+        self.save_to_path = save_to_path
+        self.skip_counter = 0
+        if save_to_path is not None:
+            if save_params is None:
+                self.save_params = SaveParams(
+                    fps=default_fps,
+                    dpi=default_dpi,
+                    codec=default_codec,
+                    frame_size=default_frame_size,
+                    skip_frame=default_skip_frame
+                )
+            else:
+                self.save_params = SaveParams(
+                    fps=save_params.get('fps', default_fps),
+                    dpi=save_params.get('dpi', default_dpi),
+                    codec=save_params.get('codec', default_codec),
+                    frame_size=save_params.get('frame_size', default_frame_size),
+                    skip_frame=save_params.get('skip_frame', default_skip_frame)
+                )
+            fourcc = cv2.VideoWriter_fourcc(*self.save_params['codec'])
+            self.video_writer = cv2.VideoWriter(save_to_path, fourcc, self.save_params['fps'], self.save_params['frame_size'])
+
 
     def plot_in_loop_pre(
             self, 
@@ -206,7 +262,7 @@ class MpcPlotInLoop:
         # self.map_ax.add_patch(veh)
         # self.remove_later.append(veh)
 
-    def plot_in_loop(self, dyn_obstacle_list=None, time=None, autorun=False, zoom_in=None):
+    def plot_in_loop(self, dyn_obstacle_list=None, time=None, autorun=False, zoom_in=None,):
         '''
         Arguments:
             dyn_obstacle_list: list of obstacle_list, where each one has N_hor predictions
@@ -256,11 +312,21 @@ class MpcPlotInLoop:
                 ax.set_xlim([x_min, x_max+1e-3])
                 ax.set_ylim([y_min, y_max+1e-3])
 
-        plt.draw()
-        plt.pause(0.01)
-        if not autorun:
-            while not plt.waitforbuttonpress():
-                pass
+        self.fig.canvas.draw()
+        if self.save_to_path is None:
+            plt.pause(0.01)
+            if not autorun:
+                while not plt.waitforbuttonpress():
+                    pass
+        elif self.save_to_path is not None:
+            if self.skip_counter >= self.save_params['skip_frame']:
+                self.skip_counter = 0
+                save_img = np.frombuffer(self.fig.canvas.tostring_rgb(), dtype=np.uint8)
+                save_img = save_img.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
+                save_img_bgr = cv2.cvtColor(save_img, cv2.COLOR_RGB2BGR)
+                self.video_writer.write(cv2.resize(save_img_bgr, self.save_params['frame_size']))
+            else:
+                self.skip_counter += 1
 
         for j in range(len(self.remove_later)): # robot and dynamic obstacles (predictions)
             self.remove_later[j].remove()
