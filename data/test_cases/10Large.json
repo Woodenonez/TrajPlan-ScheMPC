@@ -3,6 +3,7 @@
         "Big_number": 500,
         "Autonomy": 5000,
         "charging_coefficient": 1,
+        "Environment": "LargeEnv",
         "nodes": {
               "D01":{"x":-20,"y":90,"next":["D11"]},
               "D02":{"x":-17,"y":90,"next":["D12"]},
@@ -115,7 +116,15 @@
     },
     "ATRs": {
       "A1": "D01",
-      "A6": "D21"
+      "A2": "D02",
+      "A3": "D03",
+      "A4": "D04",
+      "A5": "D05",
+      "A6": "D21",
+      "A7": "D22",
+      "A8": "D23",
+      "A9": "D24",
+      "A10": "D25"
     },
     "jobs": {
         "1": {
@@ -145,6 +154,120 @@
             "TW": [],
             "Service": 0,
             "ATR": ["A6"]
+        },
+        "3": {
+              "location": "L23",
+              "precedence": [],
+              "TW": [],
+              "Service": 0,
+              "ATR": ["A2"]
+          },
+
+        "4": {
+            "location": "P72",
+            "precedence": ["3"],
+            "TW": [],
+            "Service": 0,
+            "ATR": ["A2"]
+        },
+        "13": {
+              "location": "L2",
+              "precedence": [],
+              "TW": [],
+              "Service": 0,
+              "ATR": ["A7"]
+          },
+
+        "14": {
+            "location": "P32",
+            "precedence": ["13"],
+            "TW": [],
+            "Service": 0,
+            "ATR": ["A7"]
+        },
+        "5": {
+            "location": "L43",
+            "precedence": [],
+            "TW": [],
+            "Service": 0,
+            "ATR": ["A3"]
+        },
+        "6": {
+              "location": "P82",
+              "precedence": ["5"],
+              "TW": [],
+              "Service": 0,
+              "ATR": ["A3"]
+          },
+        "15": {
+            "location": "L3",
+            "precedence": [],
+            "TW": [],
+            "Service": 0,
+            "ATR": ["A8"]
+        },
+        "16": {
+              "location": "P42",
+              "precedence": ["15"],
+              "TW": [],
+              "Service": 0,
+              "ATR": ["A8"]
+          },
+        "7": {
+            "location": "L43",
+            "precedence": [],
+            "TW": [],
+            "Service": 0,
+          "ATR": ["A4"]
+        },
+        "8": {
+            "location": "P52",
+            "precedence": ["7"],
+            "TW": [],
+            "Service": 0,
+          "ATR": ["A4"]
+        },
+        "17": {
+            "location": "L4",
+            "precedence": [],
+            "TW": [],
+            "Service": 0,
+          "ATR": ["A9"]
+        },
+        "18": {
+            "location": "P12",
+            "precedence": ["17"],
+            "TW": [],
+            "Service": 0,
+          "ATR": ["A9"]
+        },
+        "9": {
+            "location": "N240",
+            "precedence": [],
+            "TW": [],
+            "Service": 0,
+        "ATR": ["A5"]
+        },
+        "10": {
+            "location": "N270",
+            "precedence": ["9"],
+            "TW": [],
+            "Service": 0,
+          "ATR": ["A5"]
+        },
+        "19": {
+            "location": "N270",
+            "precedence": [],
+            "TW": [],
+            "Service": 0,
+        "ATR": ["A10"]
+        },
+        "20": {
+            "location": "N240",
+            "precedence": ["19"],
+            "TW": [],
+            "Service": 0,
+          "ATR": ["A10"]
         }
     }
 }

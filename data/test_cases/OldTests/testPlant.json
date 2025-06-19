@@ -3,6 +3,7 @@
         "Big_number": 5000,
         "Autonomy": 300,
         "charging_coefficient": 1,
+        "Environment": "LargeEnv",
         "nodes": {
           "d1": {"x":12,"y": 78,"next":["N0"]},
           "d2": {"x":37, "y":78,"next":["N3"]},

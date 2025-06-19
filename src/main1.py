@@ -18,7 +18,7 @@ from src.configs import CircularRobotSpecification
 from src.visualizer.object import CircularVehicleVisualizer
 from src.visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
-def run_mpc():
+def run_mpc(EnvFolder):
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
     CFG_FNAME = "mpc_fast.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
@@ -44,8 +44,8 @@ def run_mpc():
     config_robot = CircularRobotSpecification.from_yaml(config_robot_path)
 
     ### Map, graph, and schedule paths
-    map_path = os.path.join(data_dir, "map.json")
-    graph_path = os.path.join(data_dir, "graph.json")
+    map_path = os.path.join(data_dir, f"{EnvFolder}/map.json")
+    graph_path = os.path.join(data_dir, f"{EnvFolder}/graph.json")
     schedule_path = os.path.join(data_dir, "schedule.csv")
     start_path = os.path.join(data_dir, "robot_start.json")
     with open(start_path, "r") as f:
