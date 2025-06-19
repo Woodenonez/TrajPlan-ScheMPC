@@ -10,11 +10,11 @@ MarkupSafe==2.1.2
 matplotlib==3.7.1
 networkx==2.8.8
 numpy==1.24.2
-opencv-python==4.7.0.72
+opencv-python>=4.8.1.78
 opengen==0.7.1
 packaging==23.1
 pandas==2.0.0
-Pillow==9.5.0
+Pillow>=10.3.0
 py==1.11.0
 pyparsing==3.0.9
 python-dateutil==2.8.2
