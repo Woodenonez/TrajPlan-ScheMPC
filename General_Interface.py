@@ -41,21 +41,19 @@ def general_funct(problem,scheduler = True,MPC = True):
         with open('data/schedule_demo2_data/robot_start.json','w') as write_file:
             json.dump(robot_starts,write_file,indent=4)
     if MPC:
+        with open(f'data/test_cases/{problem}.json','r') as read_file:
+            data = json.load(read_file)
+            EnvFolder = data['test_data']['Environment']
         # run the MPC
-        run_mpc()
+        run_mpc(EnvFolder)
 
 if __name__ == "__main__":
-    # problem = 'PlantNoHubs'
-    # problem = 'OneVehicle'
-    # problem = "TwoVehicles"
-    # problem = 'FiveVehicles'
-    # problem = 'ThreeVehicles'
-    problem = 'TenVehicles'
+    problem = '4Small' # SAFETY COEFF 20
 
     general_funct(
         problem,
-        scheduler = False,
-        MPC= True
+        scheduler = True,
+        MPC= False
     )
 
 

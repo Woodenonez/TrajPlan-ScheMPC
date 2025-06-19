@@ -1,7 +1,7 @@
 # type: ignore
 
 import math
-from typing import Optional
+from typing import Optional, Union, TypedDict
 
 import cv2
 import numpy as np

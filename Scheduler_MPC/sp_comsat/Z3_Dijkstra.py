@@ -26,7 +26,7 @@ def schedule(the_instance, current_routes):
     ### COMMENT THIS ON (AND THE LINE IN CONSTRAINT one_node_at_a_time TO ALLOW HUB NODES #####
     # hubs = [i.depot for i in idle_atrs]
 
-    SafetyCoefficient = 20
+    SafetyCoefficient = 30
 
     # a variable for each node (operation) of each route (job)
     visit_node = [[Real('vehicle_%s_VISITS_node_%s' % (i.vehicle, j_index))
@@ -166,7 +166,6 @@ def schedule(the_instance, current_routes):
         for j2, edge2 in enumerate(route2.edges)
         if route1 != route2
         and edge1[0] == edge2[1] and edge1[1] == edge2[0]
-        # and the_instance.graph.get_edge_data(*edge1)['capacity'] == 1
     ]
 
     delayed_start = [
@@ -182,7 +181,7 @@ def schedule(the_instance, current_routes):
     # HERE I BUILD UP THE MODEL FOR THE SCHEDULING PROBLEM
     set_option(rational_to_decimal=True)
     set_option(precision=2)
-    scheduling = Solver()
+    scheduling = Optimize()
 
     # ASSERT THE CONSTRAINTS...
     scheduling.add(
@@ -191,42 +190,42 @@ def schedule(the_instance, current_routes):
         charge_time +
         visit_precedence +
         visit_tw +
-        leaving_a_node +
-        staying_at_a_node +
-        one_node_at_a_time +
-        edges_direct +
-        edges_inverse +
-        delayed_start
+        leaving_a_node
+        # staying_at_a_node +
+        # one_node_at_a_time +
+        # edges_direct +
+        # edges_inverse +
+        # delayed_start
     )
 
-    # scheduling.minimize(
-    #     # penalize vehicles from getting to the goal later/earlier than in the middle
-    #     # of the time window
-    #     # Sum([
-    #     #     Abs(visit_node[i_index][j_index] - ((j[1] - j[0])/2) )
-    #     #     for i_index, i in enumerate(routes_plus_idle)
-    #     #     for j_index, j in enumerate(i.TW)
-    #     #     if j != []
-    #     # ])
-    #     # +
-    #     # discourage vehicels from waiting at nodes
-    #     Sum([
-    #         (leave_node[i_index][j] - visit_node[i_index][j])
-    #         for i_index, i in enumerate(routes_plus_idle)
-    #         for j, _ in enumerate(i.nodes)
-    #         if j != 0 and j != len(i.nodes)
-    #     ])
-    #     # -
-    #     # encourage delay between vehicles start
-    #     # 1000*Sum([delayed_start[i] for i in range(len(routes_plus_idle))])
-    #     +
-    #     # encourage vehicle to be as fast as possible
-    #     Sum([
-    #     visit_node[i_index][j]
-    #     for i_index, i in enumerate(routes_plus_idle)
-    #     for j, _ in enumerate(i.nodes)
-    #     ])
-    # )
+    scheduling.minimize(
+        # penalize vehicles from getting to the goal later/earlier than in the middle
+        # of the time window
+        # Sum([
+        #     Abs(visit_node[i_index][j_index] - ((j[1] - j[0])/2) )
+        #     for i_index, i in enumerate(routes_plus_idle)
+        #     for j_index, j in enumerate(i.TW)
+        #     if j != []
+        # ])
+        # +
+        # discourage vehicels from waiting at nodes
+        Sum([
+            (leave_node[i_index][j] - visit_node[i_index][j])
+            for i_index, i in enumerate(routes_plus_idle)
+            for j, _ in enumerate(i.nodes)
+            if j != 0 and j != len(i.nodes)
+        ])
+        # -
+        # encourage delay between vehicles start
+        # 1000*Sum([delayed_start[i] for i in range(len(routes_plus_idle))])
+        +
+        # encourage vehicle to be as fast as possible
+        Sum([
+        visit_node[i_index][j]
+        for i_index, i in enumerate(routes_plus_idle)
+        for j, _ in enumerate(i.nodes)
+        ])
+    )
 
     nodes_schedule = {}
     edges_schedule = []

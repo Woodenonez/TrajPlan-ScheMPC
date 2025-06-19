@@ -3,6 +3,7 @@
     "Big_number": 50.0,
     "Autonomy": 20.0,
     "charging_coefficient": 1.0,
+    "Environment": "LargeEnv",
     "nodes": {
       "home_10": {"x": 8.3,"y": 2.8,"next":["pre_home_10"]},
       "home_12": {"x": 8.5,"y": 4.2,"next":["pre_home_12"]},

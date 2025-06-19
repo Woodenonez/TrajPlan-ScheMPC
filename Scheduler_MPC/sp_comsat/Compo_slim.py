@@ -8,6 +8,7 @@ from Scheduler_MPC.sp_comsat.classes import Task, Instance, ATR
 ###### The sub-problems algorithms #########
 from Scheduler_MPC.sp_comsat.E_Routing_Gurobi import routing
 from Scheduler_MPC.sp_comsat.scheduling_model import schedule
+# from Scheduler_MPC.sp_comsat.Z3_Dijkstra import schedule
 from Scheduler_MPC.sp_comsat.path_changer_Gurobi import changer
 from Scheduler_MPC.sp_comsat.route_checker_slim import routes_checking
 import math
