@@ -406,17 +406,21 @@ class TrajectoryTracker:
         ### Complementary restrictions for velocity and angular velocity ###
         # speed_decay = 0.0
         current_ref_theta = math.degrees(ref_states[0, 2]) % 360
+        current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
         current_theta = math.degrees(self.state[2]) % 360
         theta_diff = abs(current_ref_theta - current_theta)
         if theta_diff > 180:
             theta_diff = 360 - theta_diff
+        theta_diff_last = abs(current_ref_theta_last - current_theta)
+        if theta_diff_last > 180:
+            theta_diff_last = 360 - theta_diff_last
         # if (theta_diff := (abs(current_ref_theta - current_theta) % 180)) > 120:
         #     self.set_work_mode(mode='aligning')
         # elif theta_diff > 60:
         #     speed_decay = min(max(theta_diff/180, 0.0), 1.0)
         #     self.set_work_mode(mode='work', use_predefined_speed=False)
         
-        if theta_diff > 90:
+        if theta_diff > 100: # and theta_diff_last > 90:
             self.set_work_mode(mode='aligning')
         else:
             self.set_work_mode(mode='work', use_predefined_speed=False)
@@ -547,7 +551,10 @@ class TrajectoryTracker:
             print(f"\033[38;2;{r};{g};{b}m{text} \033[38;2;255;255;255m", end=end) 
         if self.monitor_on:
             self.cost_monitor.report_cost(monitored_cost, object_id=object_id, report_steps=report_steps)
-        solver_time = round(self.solver_time_timelist[-1], 3)
+        if self.solver_time_timelist:
+            solver_time = round(self.solver_time_timelist[-1], 3)
+        else:
+            solver_time = -1.0
         if solver_time > 0.8*self.ts*1000:
             colored_print(0, 255, 0, f"Mode: {self._mode}. Real cost: {round(real_cost, 4)}. Step runtime: {round(step_runtime, 3)} sec.", end=' ')
             colored_print(255, 0, 0, f"Solver time: {solver_time} ms.")
