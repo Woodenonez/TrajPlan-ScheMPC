@@ -37,7 +37,7 @@ def general_funct(problem,scheduler = True,MPC = True):
             for key,value in ATRs.items()
         }
         # upload json file for the MPC
-        with open('data/schedule_demo2_data/robot_start.json','w') as write_file:
+        with open('data/schedule_demo2_data/robot_start.json', 'w') as write_file:
             json.dump(robot_starts,write_file,indent=4)
     if MPC:
         from src.main1 import run_mpc
@@ -48,11 +48,12 @@ def general_funct(problem,scheduler = True,MPC = True):
         run_mpc(EnvFolder)
 
 if __name__ == "__main__":
-    problem = '4Small' # SAFETY COEFF 20
+    # problem = '4Small' # SAFETY COEFF 20
+    problem = "10Large"
 
     general_funct(
         problem,
-        scheduler = False,
+        scheduler = True,
         MPC= True
     )
 
