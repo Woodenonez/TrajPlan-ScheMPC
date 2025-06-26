@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.lines import Line2D
 from matplotlib.gridspec import GridSpec
+from matplotlib.widgets import Button
 
 from matplotlib.axes import Axes
 from src.configs import CircularRobotSpecification
@@ -84,7 +85,7 @@ def figure_formatter(window_title:str, num_axes_per_column:list=None, num_axes_p
     return fig, gs, axis_format
 
 class MpcPlotInLoop:
-    def __init__(self, config: CircularRobotSpecification, map_only=False, save_to_path:Optional[str]=None, save_params:Optional[Union[SaveParams, dict]]=None) -> None:
+    def __init__(self, config: CircularRobotSpecification, map_only=False, fig_ratio:float=1.0, save_to_path:Optional[str]=None, save_params:Optional[Union[SaveParams, dict]]=None) -> None:
         """
         Args:
             config: The configuration of the robot.
@@ -112,7 +113,7 @@ class MpcPlotInLoop:
             dpi = self.save_params['dpi']
 
         fig_size_x = 16 if not map_only else 10 # use the width of the figure as the base
-        fig_size_y = int(self.save_params['frame_size'][1] / self.save_params['frame_size'][0] * fig_size_x) 
+        fig_size_y = int(fig_size_x / fig_ratio)
 
         if map_only:
             self.fig, self.map_ax = plt.subplots(figsize=(fig_size_x, fig_size_y), dpi=dpi)
@@ -129,11 +130,27 @@ class MpcPlotInLoop:
         self.plot_dict_temp = {}   # flush for every time step
         self.plot_dict_inloop = {} # update every time step, flush for every life cycle
 
+        self._running = False
+        self._btn_play = Button(plt.axes([0.7, 0.05, 0.1, 0.075]), 'Play')
+        self._btn_pause = Button(plt.axes([0.81, 0.05, 0.1, 0.075]), 'Pause')
+        self._btn_play.on_clicked(self.running_continue)
+        self._btn_pause.on_clicked(self.running_pause)
+
     def show(self):
         self.fig.show()
 
     def close(self):
         plt.close(self.fig)
+
+    def running_continue(self, event):
+        self._running = True
+        self._btn_play.ax.set_facecolor('lightgreen')
+        self._btn_pause.ax.set_facecolor('lightgray')
+
+    def running_pause(self, event):
+        self._running = False
+        self._btn_pause.ax.set_facecolor('lightgreen')
+        self._btn_play.ax.set_facecolor('lightgray')
 
     def init_video_writer(self, save_to_path: Optional[str], save_params: Optional[Union[SaveParams, dict]]):
         """Initialize the video writer if the path is not None.
@@ -318,9 +335,15 @@ class MpcPlotInLoop:
         self.fig.canvas.draw()
         if self.save_to_path is None:
             plt.pause(0.01)
-            if not autorun:
+            if autorun:
+                while not self._running:
+                    self.map_ax.set_title(f'Time: {time:.2f}s / {time/self.ts:.2f} - Pause')
+                    plt.pause(0.1)
+            else:
                 while not plt.waitforbuttonpress():
                     pass
+
+
         elif self.save_to_path is not None:
             if self.skip_counter >= self.save_params['skip_frame']:
                 self.skip_counter = 0
