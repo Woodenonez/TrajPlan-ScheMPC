@@ -28,7 +28,7 @@ def run_mpc(EnvFolder):
     VERBOSE = False
     TIMEOUT = 3000
 
-    save_video_path = None#f'./Demo/{DATA_NAME}_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.mp4'
+    save_video_path = f'./Demo/{DATA_NAME}_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.mp4'
 
     root_dir = pathlib.Path(__file__).resolve().parents[1]
     data_dir = os.path.join(root_dir, "data", DATA_NAME)
@@ -56,6 +56,7 @@ def run_mpc(EnvFolder):
     gpc.load_graph_from_json(graph_path)
     gpc.load_map_from_json(map_path, inflation_margin=config_robot.vehicle_width+config_robot.vehicle_margin)
     robot_ids = gpc.robot_ids if robot_ids is None else robot_ids
+    boundary_coords = gpc.current_map.boundary_coords
     static_obstacles = gpc.inflated_map.obstacle_coords_list
 
     ### Set up robots
@@ -75,7 +76,10 @@ def run_mpc(EnvFolder):
         robot_manager.add_schedule(rid, np.asarray(robot_starts[str(rid)]), path_coords, path_times)
 
     ### Run
-    main_plotter = MpcPlotInLoop(config_robot, map_only=MAP_ONLY, save_to_path=save_video_path, save_params={'skip_frame': 0})
+    map_width  = max(np.asarray(boundary_coords)[:, 0]) - min(np.asarray(boundary_coords)[:, 0])
+    map_height = max(np.asarray(boundary_coords)[:, 1]) - min(np.asarray(boundary_coords)[:, 1])
+    save_params = {'skip_frame': 0, 'frame_size': (1280, int(map_height/map_width * 1280)), 'dpi': 300}
+    main_plotter = MpcPlotInLoop(config_robot, map_only=MAP_ONLY, save_to_path=save_video_path, save_params=save_params)
     # main_plotter.plot_in_loop_pre(gpc.current_map, gpc.inflated_map, gpc.current_graph)
     main_plotter.plot_in_loop_pre(gpc.current_map, graph_manager=gpc.current_graph)
     color_list = [

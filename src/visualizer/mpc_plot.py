@@ -111,10 +111,13 @@ class MpcPlotInLoop:
         else:
             dpi = self.save_params['dpi']
 
+        fig_size_x = 16 if not map_only else 10 # use the width of the figure as the base
+        fig_size_y = int(self.save_params['frame_size'][1] / self.save_params['frame_size'][0] * fig_size_x) 
+
         if map_only:
-            self.fig, self.map_ax = plt.subplots(figsize=(10, 8), dpi=dpi)
+            self.fig, self.map_ax = plt.subplots(figsize=(fig_size_x, fig_size_y), dpi=dpi)
         else:
-            self.fig, self.gs, axis_format = figure_formatter('PlotInLoop', [3,1], figure_size=(16, 8), dpi=dpi)
+            self.fig, self.gs, axis_format = figure_formatter('PlotInLoop', [3,1], figure_size=(fig_size_x, fig_size_y), dpi=dpi)
 
             self.vel_ax  :Axes = axis_format[0][0]
             self.omega_ax:Axes = axis_format[0][1]
