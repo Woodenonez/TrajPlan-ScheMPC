@@ -84,6 +84,7 @@ def figure_formatter(window_title:str, num_axes_per_column:list=None, num_axes_p
                 axis_format[i].append(fig.add_subplot(gs[i, col_start:col_end]))
     return fig, gs, axis_format
 
+
 class MpcPlotInLoop:
     def __init__(self, config: CircularRobotSpecification, map_only=False, fig_ratio:float=1.0, save_to_path:Optional[str]=None, save_params:Optional[Union[SaveParams, dict]]=None) -> None:
         """
@@ -131,10 +132,11 @@ class MpcPlotInLoop:
         self.plot_dict_inloop = {} # update every time step, flush for every life cycle
 
         self._running = False
-        self._btn_play = Button(plt.axes([0.7, 0.05, 0.1, 0.075]), 'Play')
-        self._btn_pause = Button(plt.axes([0.81, 0.05, 0.1, 0.075]), 'Pause')
-        self._btn_play.on_clicked(self.running_continue)
-        self._btn_pause.on_clicked(self.running_pause)
+        if save_to_path is None:
+            self._btn_play = Button(plt.axes([0.7, 0.05, 0.1, 0.075]), 'Play')
+            self._btn_pause = Button(plt.axes([0.81, 0.05, 0.1, 0.075]), 'Pause')
+            self._btn_play.on_clicked(self.running_continue)
+            self._btn_pause.on_clicked(self.running_pause)
 
     def show(self):
         self.fig.show()

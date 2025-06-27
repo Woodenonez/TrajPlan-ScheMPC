@@ -18,7 +18,7 @@ from src.configs import CircularRobotSpecification
 from src.visualizer.object import CircularVehicleVisualizer
 from src.visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
-def run_mpc(EnvFolder):
+def run_mpc(EnvFolder, recording=False):
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
     CFG_FNAME = "mpc_fast.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
@@ -28,7 +28,10 @@ def run_mpc(EnvFolder):
     VERBOSE = False
     TIMEOUT = 3000
 
-    save_video_path = None#f'./Demo/{DATA_NAME}_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.mp4'
+    if recording:
+        save_video_path = f'./Demo/{DATA_NAME}_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.mp4'
+    else:
+        save_video_path = None
 
     root_dir = pathlib.Path(__file__).resolve().parents[1]
     data_dir = os.path.join(root_dir, "data", DATA_NAME)
