@@ -198,7 +198,8 @@ class LocalTrajPlanner:
             ref_speed = None
 
         if (self._base_traj_docking_idx+self.N_hor >= len(self._base_traj)): # if horizon exceeds the base trajectory
-            ref_states = np.array(self._base_traj[self._base_traj_docking_idx:] + [self._base_traj[-1]]*(self.N_hor-(len(self._base_traj)-self._base_traj_docking_idx)))
+            ref_states = np.array(self._base_traj[self._base_traj_docking_idx:] + \
+                                  [self._base_traj[-1]]*(self.N_hor-(len(self._base_traj)-self._base_traj_docking_idx)))
         else:
             ref_states = np.array(self._base_traj[self._base_traj_docking_idx:self._base_traj_docking_idx+self.N_hor])
 

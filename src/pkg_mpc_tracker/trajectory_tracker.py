@@ -408,12 +408,8 @@ class TrajectoryTracker:
         current_ref_theta = math.degrees(ref_states[0, 2]) % 360
         current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
         current_theta = math.degrees(self.state[2]) % 360
-        theta_diff = abs(current_ref_theta - current_theta)
-        if theta_diff > 180:
-            theta_diff = 360 - theta_diff
-        theta_diff_last = abs(current_ref_theta_last - current_theta)
-        if theta_diff_last > 180:
-            theta_diff_last = 360 - theta_diff_last
+        theta_diff = self.angle_diff(current_ref_theta, current_theta)
+        theta_diff_last = self.angle_diff(current_ref_theta_last, current_theta)
         # if (theta_diff := (abs(current_ref_theta - current_theta) % 180)) > 120:
         #     self.set_work_mode(mode='aligning')
         # elif theta_diff > 60:
@@ -424,8 +420,25 @@ class TrajectoryTracker:
             self.set_work_mode(mode='aligning')
         else:
             self.set_work_mode(mode='work', use_predefined_speed=False)
+
+        ### Check if turning around ###
+        mid_idx = 2
+        ref_theta_diff = self.angle_diff(current_ref_theta, current_ref_theta_last)
+        if (ref_theta_diff > 170):
+            all_ref_thetas = np.degrees(ref_states[:, 2]) % 360
+            all_theta_diffs = self.angle_diff(all_ref_thetas, current_theta)
+            try:
+                turn_idx = np.where(all_theta_diffs>170)[0][0]
+            except IndexError:
+                turn_idx = self.N_hor - 1 # if no turn found, use the last index
+            if turn_idx < mid_idx: # prioritize turning around
+                current_refs = np.vstack(( np.tile(ref_states[[turn_idx], :], (turn_idx+1, 1)), ref_states[turn_idx+1:, :] )).reshape(-1).tolist()
+                self.set_work_mode(mode='aligning')
+            else: # prioritize going straight
+                current_refs = np.vstack(( ref_states[:turn_idx, :], np.tile(ref_states[[turn_idx], :], (self.N_hor-turn_idx, 1)) )).reshape(-1).tolist()
+        assert len(current_refs) == self.ns * self.N_hor, f"Reference states should have {self.ns * self.N_hor} elements, got {len(current_refs)}."
             
-        ### Assemble parameters for solver & Run MPC###
+        ### Assemble parameters for solver & Run MPC ###
         params = list(last_u) + list(self.state) + list(finish_state) + self.tuning_params + \
                  current_refs + speed_ref_list + other_robot_states + \
                  stc_constraints + dyn_constraints + self.stc_weights + self.dyn_weights
@@ -455,7 +468,7 @@ class TrajectoryTracker:
         self.cost_timelist.append(cost)
         self.solver_time_timelist.append(solver_time)
 
-        return actions, pred_states, ref_states, cost, monitored_costs
+        return actions, pred_states, np.array(current_refs).reshape(self.N_hor, self.ns) , cost, monitored_costs
 
     def run_solver(self, parameters:list, state: np.ndarray, take_steps:int=1):
         """Run the solver for the pre-defined MPC problem.
@@ -562,6 +575,11 @@ class TrajectoryTracker:
             colored_print(0, 255, 0, f"Mode: {self._mode}. Real cost: {round(real_cost, 4)}. Step runtime: {round(step_runtime, 3)} sec. Solver time: {solver_time} ms.")
         print("="*20)
         
+    @staticmethod
+    def angle_diff(a, b):
+        diff = np.array(abs(a - b)) 
+        diff[diff > 180] = 360 - diff[diff > 180] # if the angle difference is larger than 180, use the other direction
+        return diff
 
     @staticmethod
     def lineseg_dists(points: np.ndarray, line_points_1: np.ndarray, line_points_2: np.ndarray) -> np.ndarray:

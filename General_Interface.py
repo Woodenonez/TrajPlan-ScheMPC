@@ -51,7 +51,7 @@ if __name__ == "__main__":
         problem,
         scheduler = True,
         MPC= True,
-        recording=True
+        recording=False
     )
 
 
