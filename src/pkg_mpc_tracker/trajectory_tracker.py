@@ -422,7 +422,7 @@ class TrajectoryTracker:
             self.set_work_mode(mode='work', use_predefined_speed=False)
 
         ### Check if turning around ###
-        mid_idx = 2
+        mid_idx = 0
         ref_theta_diff = self.angle_diff(current_ref_theta, current_ref_theta_last)
         if (ref_theta_diff > 170):
             all_ref_thetas = np.degrees(ref_states[:, 2]) % 360

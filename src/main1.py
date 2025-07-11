@@ -113,8 +113,11 @@ def run_mpc(EnvFolder, recording=False):
             visualizer = robot_manager.get_visualizer(rid)
             other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
 
-            ref_states, ref_speed, *_ = planner.get_local_ref(kt*config_mpc.ts, (float(robot.state[0]), float(robot.state[1])), idx_check_range=15)
-            print(f"Robot {rid} ref speed: {round(ref_speed, 4)}") # XXX
+            ref_states, ref_speed, *_ = planner.get_local_ref(
+                kt*config_mpc.ts, 
+                (float(robot.state[0]), float(robot.state[1])), 
+                idx_check_range=5)
+            print(f"Robot {rid}, ref speed: {round(ref_speed, 4)}, next goal:{planner._current_target_node}") # XXX
             controller.set_current_state(robot.state)
             controller.set_ref_states(ref_states, ref_speed=ref_speed)
             (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,

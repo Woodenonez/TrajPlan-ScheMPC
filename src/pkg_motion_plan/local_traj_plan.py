@@ -194,6 +194,7 @@ class LocalTrajPlanner:
             distance_to_current_node = math.hypot(current_pos[0]-self._current_target_node[0], current_pos[1]-self._current_target_node[1])
             timediff_to_current_node = max(self._ref_path_time[self._current_target_node_idx] - current_time, 0) + 1e-6
             ref_speed = min(distance_to_current_node/timediff_to_current_node, self.v_max)
+            # print(distance_to_current_node, '/', timediff_to_current_node, '->', self._ref_path_time[self._current_target_node_idx]) # XXX
         else:
             ref_speed = None
 
@@ -203,8 +204,10 @@ class LocalTrajPlanner:
         else:
             ref_states = np.array(self._base_traj[self._base_traj_docking_idx:self._base_traj_docking_idx+self.N_hor])
 
-        self._current_target_node_idx = self._ref_path.index(self._base_traj_target_node[self._base_traj_docking_idx])
-        self._current_target_node = self._ref_path[self._current_target_node_idx]
+        self._current_target_node = self._base_traj_target_node[self._base_traj_docking_idx]
+        target_node_idc = np.where([x==self._current_target_node for x in self._ref_path])[0]
+        self._current_target_node_idx = target_node_idc[target_node_idc >= self._current_target_node_idx][0] 
+
         if self._current_target_node_idx == len(self._ref_path)-1:
             done = True
         else:
