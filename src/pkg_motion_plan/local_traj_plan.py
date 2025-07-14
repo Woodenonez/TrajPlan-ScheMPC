@@ -206,7 +206,10 @@ class LocalTrajPlanner:
 
         self._current_target_node = self._base_traj_target_node[self._base_traj_docking_idx]
         target_node_idc = np.where([x==self._current_target_node for x in self._ref_path])[0]
-        self._current_target_node_idx = target_node_idc[target_node_idc >= self._current_target_node_idx][0] 
+        try:
+            self._current_target_node_idx = target_node_idc[target_node_idc >= self._current_target_node_idx][0] 
+        except IndexError:
+            self._current_target_node_idx = self._current_target_node_idx
 
         if self._current_target_node_idx == len(self._ref_path)-1:
             done = True

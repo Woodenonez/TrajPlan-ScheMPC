@@ -278,7 +278,8 @@ class MpcPlotInLoop:
 
         temp_list = [current_ref_traj, pred_states]
         for new_data, line in zip(temp_list, self.plot_dict_temp[object_id]):
-            line.set_data(new_data[:, 0], new_data[:, 1])
+            if new_data is not None:
+                line.set_data(new_data[:, 0], new_data[:, 1])
 
         # veh = patches.Circle((state[0], state[1]), self.width/2, color=color, alpha=0.7, label=f'Robot {object_id}')
         # self.map_ax.add_patch(veh)

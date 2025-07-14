@@ -26,7 +26,7 @@ def run_mpc(EnvFolder, recording=False):
     AUTORUN = True # if false, press key (in the plot window) to continue
     MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = False
-    TIMEOUT = 3000
+    TIMEOUT = 6000
 
     if recording:
         save_video_path = f'./Demo/{DATA_NAME}_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.mp4'
@@ -113,11 +113,15 @@ def run_mpc(EnvFolder, recording=False):
             visualizer = robot_manager.get_visualizer(rid)
             other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
 
+            if controller.idle:
+                main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
+                continue
+
             ref_states, ref_speed, *_ = planner.get_local_ref(
                 kt*config_mpc.ts, 
                 (float(robot.state[0]), float(robot.state[1])), 
                 idx_check_range=5)
-            print(f"Robot {rid}, ref speed: {round(ref_speed, 4)}, next goal:{planner._current_target_node}") # XXX
+            print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed, 4)}, next goal:{planner._current_target_node}") # XXX
             controller.set_current_state(robot.state)
             controller.set_ref_states(ref_states, ref_speed=ref_speed)
             (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
@@ -130,8 +134,8 @@ def run_mpc(EnvFolder, recording=False):
                                    object_id=f"Robot {rid}")
 
             ### Real run
-            if (np.linalg.norm(robot.state[:2] - ref_states[-1][:2]) > 0.5):
-                if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - ref_states[-1][:2]) > 0.8):
+            if (np.linalg.norm(robot.state[:2] - ref_states[-1][:2]) > 0.3):
+                if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - ref_states[-1][:2]) > 0.8) or planner.idle:
                     robot.step(actions[-1])
             robot_manager.set_pred_states(rid, np.asarray(pred_states))
 

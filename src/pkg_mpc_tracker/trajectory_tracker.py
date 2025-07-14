@@ -87,6 +87,7 @@ class TrajectoryTracker:
         self._idle = True
         self._mode: str = 'none'
         self._map_loaded = False
+        self._init_guess = [0.0]*self.nu*self.N_hor
         self._obstacle_weights()
         self.set_work_mode(mode='safe', use_predefined_speed=True)
 
@@ -322,7 +323,7 @@ class TrajectoryTracker:
         """
         if external_check:
             self.finishing = True
-            if np.allclose(self.state[:2], self.final_goal[:2], atol=0.1, rtol=0) and abs(self.past_actions[-1][0]) < 0.1:
+            if np.allclose(self.state[:2], self.final_goal[:2], atol=0.5, rtol=0) and abs(self.past_actions[-1][0]) < 0.1:
                 self._idle = True
                 if self.vb:
                     print(f"[{self.__class__.__name__}-{self.robot_id}] Trajectory tracking finished.")
@@ -445,7 +446,7 @@ class TrajectoryTracker:
 
         try:
             # self.solver_debug(stc_constraints) # use to check (visualize) the environment
-            taken_states, pred_states, actions, cost, solver_time, exit_status, u = self.run_solver(params, self.state, self.config.action_steps)
+            taken_states, pred_states, actions, cost, solver_time, exit_status, u = self.run_solver(params, self.state, self.config.action_steps, initial_guess=self._init_guess)
             # actions = [x*np.array([1.0-speed_decay, 1.0]) for x in actions]
             if exit_status in self.config.bad_exit_codes and self.vb:
                 print(f"[{self.__class__.__name__}-{self.robot_id}] Bad converge status: {exit_status}")
@@ -467,10 +468,11 @@ class TrajectoryTracker:
         self.state = taken_states[-1]
         self.cost_timelist.append(cost)
         self.solver_time_timelist.append(solver_time)
+        # self._init_guess = [x for x in u] # use the last u as initial guess for next step
 
         return actions, pred_states, np.array(current_refs).reshape(self.N_hor, self.ns) , cost, monitored_costs
 
-    def run_solver(self, parameters:list, state: np.ndarray, take_steps:int=1):
+    def run_solver(self, parameters:list, state: np.ndarray, take_steps:int=1, initial_guess:Optional[list]=None):
         """Run the solver for the pre-defined MPC problem.
 
         Args:
@@ -498,7 +500,7 @@ class TrajectoryTracker:
                 return self.run_solver_tcp(parameters, state, take_steps)
 
             import opengen as og
-            solution:og.opengen.tcp.solver_status.SolverStatus = self.solver.run(parameters)
+            solution:og.opengen.tcp.solver_status.SolverStatus = self.solver.run(parameters, initial_guess)
             
             u:list[float]       = solution.solution
             cost:float          = solution.cost
