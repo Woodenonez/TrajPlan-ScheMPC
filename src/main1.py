@@ -4,6 +4,7 @@ import pathlib
 import datetime
 
 import numpy as np
+import pandas as pd # type: ignore
 
 from src.basic_motion_model.motion_model import UnicycleModel
 
@@ -26,7 +27,7 @@ def run_mpc(EnvFolder, recording=False):
     AUTORUN = True # if false, press key (in the plot window) to continue
     MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = False
-    TIMEOUT = 6000
+    TIMEOUT = 1000
 
     if recording:
         save_video_path = f'./Demo/{DATA_NAME}_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.mp4'
@@ -101,6 +102,8 @@ def run_mpc(EnvFolder, recording=False):
                                        color=color_list[i])
         visualizer.plot(main_plotter.map_ax, *robot.state)
 
+    actual_timetable = {rid: [] for rid in robot_ids}
+
     for kt in range(TIMEOUT):
         robot_states = []
         incomplete = False
@@ -133,6 +136,11 @@ def run_mpc(EnvFolder, recording=False):
                                    debug_info['monitored_cost'],
                                    object_id=f"Robot {rid}")
 
+            if not actual_timetable[rid] or actual_timetable[rid][-1][1] != gpc.get_node_id(planner._current_target_node):
+                actual_timetable[rid].append((kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node)))
+            else: # overwrite the time
+                actual_timetable[rid][-1] = (kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node))
+
             ### Real run
             if (np.linalg.norm(robot.state[:2] - ref_states[-1][:2]) > 0.3):
                 if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - ref_states[-1][:2]) > 0.8) or planner.idle:
@@ -155,6 +163,21 @@ def run_mpc(EnvFolder, recording=False):
     main_plotter.show()
     input('Press anything to finish!')
     main_plotter.close()
+
+    # Convert actual_timetable to DataFrame and save to CSV
+    rows = []
+    for rid, schedule in actual_timetable.items():
+        for time, node_id in schedule:
+            rows.append({
+                'robot_id': rid,
+                'node_id': node_id,
+                'ETA': time
+            })
+    actual_df = pd.DataFrame(rows)
+    actual_df = actual_df.sort_values(['robot_id', 'ETA'])
+    actual_schedule_path = os.path.join(data_dir, "actual_schedule.csv")
+    actual_df.to_csv(actual_schedule_path, index=False)
+    print(f"Actual schedule saved to: {actual_schedule_path}")
 
     if MONITOR_COST: # XXX
         import matplotlib.pyplot as plt # type: ignore

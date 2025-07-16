@@ -117,6 +117,11 @@ class GlobalPathCoordinator:
     def load_img_map(self, img_path: str):
         self.img_map = OccupancyMap.from_image(img_path)
 
+    def get_node_id(self, coord: tuple) -> Optional[Any]:
+        """Get node ID by coordinates"""
+        assert self._G is not None, "The graph is not loaded."
+        node_ids = self._G.get_node_ids(coord)
+        return node_ids[0] if node_ids else None
 
     def get_schedule_with_node_index(self, robot_id: int) -> tuple[list, Optional[list[float]], bool]:
         """Get the schedule of a robot.
