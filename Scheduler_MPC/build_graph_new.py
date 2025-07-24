@@ -52,7 +52,8 @@ def build_Environment(Env,PrintMap=False):
 
     for node,coord in nodes.items():
         print(f'\"{node}\":{{\"x\":{coord[0]},\"y\":{coord[1]},\"next\":{nodes_dict[node]["next"]}}},')
-
+    print(len(nodes))
+    print(len(edges))
     # for i in edges:
     #     print(f'\"{i[0]},{i[1]}\":[{round(math.dist((nodes[i[0]]),(nodes[i[1]])))},1],')
 
@@ -80,4 +81,4 @@ def build_Environment(Env,PrintMap=False):
     plt.show()
 
 if __name__ == "__main__":
-    build_Environment('SmallEnv',True)
+    build_Environment('LargeEnv',True)

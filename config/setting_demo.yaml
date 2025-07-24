@@ -4,7 +4,7 @@ data_dir: schedule_demo_data
 start_file: robot_start.json
 graph_file: graphdata.json
 map_file: mapdata.json
-schedule_file: schedule.csv
+schedule_file: Schedule_4Small.csv
 
 ### Config
 config_robot_file: robot_spec.yaml

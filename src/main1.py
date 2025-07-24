@@ -27,7 +27,7 @@ def run_mpc(EnvFolder, recording=False):
     AUTORUN = True # if false, press key (in the plot window) to continue
     MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = False
-    TIMEOUT = 1000
+    TIMEOUT = 10000
 
     if recording:
         save_video_path = f'./Demo/{DATA_NAME}_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.mp4'
@@ -175,7 +175,7 @@ def run_mpc(EnvFolder, recording=False):
             })
     actual_df = pd.DataFrame(rows)
     actual_df = actual_df.sort_values(['robot_id', 'ETA'])
-    actual_schedule_path = os.path.join(data_dir, "actual_schedule.csv")
+    actual_schedule_path = os.path.join(data_dir, "Actual_4Small.csv")
     actual_df.to_csv(actual_schedule_path, index=False)
     print(f"Actual schedule saved to: {actual_schedule_path}")
 

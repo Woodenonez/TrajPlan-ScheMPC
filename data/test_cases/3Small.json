@@ -1,6 +1,6 @@
 {
     "test_data": {
-        "Big_number": 500,
+        "Big_number": 200,
         "Autonomy": 500,
         "charging_coefficient": 1,
         "Environment": "SmallEnv",

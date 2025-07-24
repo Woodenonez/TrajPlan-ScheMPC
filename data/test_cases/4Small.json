@@ -109,7 +109,7 @@
             "ATR": ["A4"]
         },
         "33": {
-            "location": "N32",
+            "location": "N24",
             "precedence": ["32"],
             "TW": [],
             "Service": 0,
