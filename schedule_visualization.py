@@ -79,21 +79,21 @@ def create_delay_analysis(merged_df):
     # Create delay visualization
     # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
-    fig, ax2 = plt.subplots(figsize=(6,6))
-    if False:
+    fig, ax = plt.subplots(figsize=(6,6))
+    if True:
         # Delay over time
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
         for i, robot in enumerate(delay_df['robot_id'].unique()):
             robot_data = delay_df[delay_df['robot_id'] == robot]
-            ax1.plot(robot_data['Scheduled'], robot_data['Scheduled']-robot_data['Actual'],
+            ax.plot(robot_data['Scheduled'], robot_data['Actual']-robot_data['Scheduled'],
                     'o-', color=colors[i%len(colors)], label=robot, linewidth=2, markersize=6)
 
-        ax1.set_xlabel('Planned Time')
-        ax1.set_ylabel('Delay (Actual - Planned)')
-        ax1.set_title('Execution Delay Over Time')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        ax1.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+        ax.set_xlabel('Elapsed Time')
+        ax.set_ylabel('Delay (Actual - Scheduled)')
+        ax.set_title('Travel Delay Over Time')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.axhline(y=0, color='black', linestyle='-', alpha=0.5)
     else:
         # Delay distribution
         robot_delays = [ delay_df[delay_df['robot_id'] == robot]['Scheduled']
@@ -237,7 +237,7 @@ def main(problem):
 
 if __name__ == "__main__":
 
-    # problem = '4Small'
-    problem = '10Large'
+    problem = '4Small'
+    # problem = '10Large'
 
     main(problem)
