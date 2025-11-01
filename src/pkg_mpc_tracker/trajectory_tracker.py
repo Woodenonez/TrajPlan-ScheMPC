@@ -10,7 +10,7 @@ from typing import Callable, Optional, TypedDict
 import numpy as np
 from scipy.spatial import ConvexHull # type: ignore
 # Custom import 
-from src.configs import MpcConfiguration, CircularRobotSpecification
+from configs import MpcConfiguration, CircularRobotSpecification
 from .cost_monitor import CostMonitor, MonitoredCost
 
 

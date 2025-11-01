@@ -14,9 +14,9 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.widgets import Button
 
 from matplotlib.axes import Axes
-from src.configs import CircularRobotSpecification
-from src.basic_map.map_geometric import GeometricMap
-from src.basic_map.graph import NetGraph
+from configs import CircularRobotSpecification
+from basic_map.map_geometric import GeometricMap
+from basic_map.graph import NetGraph
 
 
 class SaveParams(TypedDict):

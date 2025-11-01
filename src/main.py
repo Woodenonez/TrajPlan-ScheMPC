@@ -6,18 +6,18 @@ import datetime
 import numpy as np
 import pandas as pd # type: ignore
 
-from src.basic_motion_model.motion_model import UnicycleModel
+from basic_motion_model.motion_model import UnicycleModel
 
-from src.pkg_motion_plan.global_path_coordinate import GlobalPathCoordinator
-from src.pkg_motion_plan.local_traj_plan import LocalTrajPlanner
-from src.pkg_mpc_tracker.trajectory_tracker import TrajectoryTracker
-from src.pkg_robot.robot import RobotManager
+from pkg_motion_plan.global_path_coordinate import GlobalPathCoordinator
+from pkg_motion_plan.local_traj_plan import LocalTrajPlanner
+from pkg_mpc_tracker.trajectory_tracker import TrajectoryTracker
+from pkg_robot.robot import RobotManager
 
-from src.configs import MpcConfiguration
-from src.configs import CircularRobotSpecification
+from configs import MpcConfiguration
+from configs import CircularRobotSpecification
 
-from src.visualizer.object import CircularVehicleVisualizer
-from src.visualizer.mpc_plot import MpcPlotInLoop # type: ignore
+from visualizer.object import CircularVehicleVisualizer
+from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
 def run_mpc(EnvFolder, recording=False):
 

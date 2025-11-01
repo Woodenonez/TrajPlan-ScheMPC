@@ -4,7 +4,7 @@ import csv
 
 def general_funct(problem, scheduler=True, MPC=True, recording=False):
     if scheduler:
-        from Scheduler_MPC.sp_comsat.Compo_slim import Compo_slim
+        from pkg_sche.sp_comsat.Compo_slim import Compo_slim
         # run the scheduler from the
         instance, optimum, running_time, len_previous_routes, paths_changed, solution = Compo_slim(problem)
         # save the schedule (I don't actually need this step, but it is more readable than the csv)
@@ -36,7 +36,7 @@ def general_funct(problem, scheduler=True, MPC=True, recording=False):
         with open('data/schedule_demo2_data/robot_start.json', 'w') as write_file:
             json.dump(robot_starts, write_file, indent=4)
     if MPC:
-        from src.main1 import run_mpc
+        from main import run_mpc
         with open(f'data/test_cases/{problem}.json','r') as read_file:
             data = json.load(read_file)
             EnvFolder = data['test_data']['Environment']
@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     general_funct(
         problem,
-        scheduler = True,
+        scheduler = False,
         MPC= True,
         recording=False
     )

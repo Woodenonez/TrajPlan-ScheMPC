@@ -1,20 +1,37 @@
 # Collision-Free Control for A Robot Fleet with Time-Constrained Scheduling
-Related design project: Time-Constrained Scheduling and Collision-Free Control for A Fleet of Mobile Robots (2023).
+
 
 ## Publication
-The paper is available: [Not Yet] \
+The paper is accepted by the IEEE/SICE International Symposium on System Integration (SII 2026): [arXiv](https://arxiv.org/abs/2510.23129) \
 Bibtex citation:
 ```
-not yet
+@misc{roselli_2025_schempc,
+      title={Combining High Level Scheduling and Low Level Control to Manage Fleets of Mobile Robots}, 
+      author={Sabino Francesco Roselli and Ze Zhang and Knut Åkesson},
+      year={2025},
+      eprint={2510.23129},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2510.23129}, 
+}
 ```
 
 ![Example](doc/cover.png "Example")
 
 ## Quick Start
+### Gurobi
+The scheduler is formulated as a MILP and solved using [Gurobi Optimizer](https://www.gurobi.com/). We recommend using the [academic named-user license](https://support.gurobi.com/hc/en-us/articles/13207658935185-How-do-I-retrieve-an-Academic-Named-User-license) for convenience. 
+
+
 ### OpEn
 The NMPC formulation is solved using open source implementation of PANOC, namely [OpEn](https://alphaville.github.io/optimization-engine/). Follow the [installation instructions](https://alphaville.github.io/optimization-engine/docs/installation) before proceeding. 
 
 ### Install dependencies
+It is recommended to use UV for managing Python environments. Create a new environment and install the dependencies using
+```
+uv pip install -r requirements.txt
+```
+or using pip directly
 ```
 pip install -r requirements.txt
 ```
@@ -29,8 +46,8 @@ After this, a new directory *mpc_solver* will appear and contain the solver. The
 ## Use Case
 Run *main.py* for ... 
 
-## ROS Simulation
-[ROS XXX](https://github.com/) [Not Yet]
+<!-- ## ROS Simulation
+[ROS XXX](https://github.com/) [Not Yet] -->
 
 ## Components
 The whole system is mainly composed of five components:
