@@ -2,7 +2,7 @@ import json
 import networkx as nx
 import matplotlib.pyplot as plt
 from itertools import islice
-from Scheduler_MPC.sp_comsat.classes import Path
+from .classes import Path
 import math
 import collections
 import itertools

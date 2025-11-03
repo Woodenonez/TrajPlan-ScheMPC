@@ -1,6 +1,6 @@
 from z3 import *
 from gurobipy import *
-from Scheduler_MPC.sp_comsat.classes import Path
+from .classes import Path
 
 def changer(graph, paths_combo, previous_paths=[]):
 

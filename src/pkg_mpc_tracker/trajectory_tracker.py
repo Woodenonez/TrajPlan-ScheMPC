@@ -528,7 +528,7 @@ class TrajectoryTracker:
         pred_states = pred_states[1:]
 
         actions = np.array(u[:self.nu*take_steps]).reshape(take_steps, self.nu).tolist()
-        actions = [np.array(action) for action in actions]
+        actions = [np.array(action) for action in actions] # type: ignore
         return taken_states, pred_states, actions, cost, solver_time, exit_status, u
 
     def run_solver_tcp(self, parameters:list, state: np.ndarray, take_steps:int=1):
@@ -558,7 +558,7 @@ class TrajectoryTracker:
         pred_states = pred_states[1:]
 
         actions = np.array(u[:self.nu*take_steps]).reshape(take_steps, self.nu).tolist()
-        actions = [np.array(action) for action in actions]
+        actions = [np.array(action) for action in actions] # type: ignore
         return taken_states, pred_states, actions, cost, solver_time, exit_status, u
     
     def report_cost(self, real_cost: float, step_runtime: float, monitored_cost: MonitoredCost, object_id:Optional[str]=None, report_steps:bool=False):
@@ -645,3 +645,65 @@ class TrajectoryTracker:
         A:np.ndarray = A_[:rc, :]
         b:np.ndarray = np.dot(A, hull_center.T) + 1.0
         return b.tolist(), A[:,0].tolist(), A[:,1].tolist()
+    
+
+    def run_naive_step(self, **kwargs):
+        ref_states = self.ref_states.copy()
+        ### Get reference velocities ###
+        dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
+        if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing:
+            ref_speed = dist_to_goal / self.N_hor / self.ts * 2
+            ref_speed = min(ref_speed, self.robot_spec.lin_vel_max)
+        else:
+            ref_speed = self.base_speed
+
+        ### Check if turning around ###
+        current_ref_theta = math.degrees(ref_states[0, 2]) % 360
+        current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
+        current_theta = math.degrees(self.state[2]) % 360
+        mid_idx = 3
+        ref_theta_diff = self.angle_diff(current_ref_theta, current_ref_theta_last)
+        if (ref_theta_diff > 170):
+            all_ref_thetas = np.degrees(ref_states[:, 2]) % 360
+            all_theta_diffs = self.angle_diff(all_ref_thetas, current_theta)
+            try:
+                turn_idx = np.where(all_theta_diffs>150)[0][0]
+            except IndexError:
+                turn_idx = self.N_hor - 1 # if no turn found, use the last index
+            if turn_idx < mid_idx: # prioritize turning around
+                current_refs = np.vstack(( np.tile(ref_states[[turn_idx], :], (turn_idx+1, 1)), ref_states[turn_idx+1:, :] ))
+                self.set_work_mode(mode='aligning')
+            else: # prioritize going straight
+                current_refs = np.vstack(( ref_states[:turn_idx, :], np.tile(ref_states[[turn_idx], :], (self.N_hor-turn_idx, 1)) ))
+        else:
+            current_refs = ref_states
+
+        dists = np.linalg.norm(current_refs[:, :2] - self.state[:2], axis=1)
+        idx = int(np.argmin(dists))
+        idx_next = min(idx + 1, len(current_refs) - 1)
+        target = current_refs[idx_next]
+        angle_to_target = np.arctan2(target[1] - self.state[1], target[0] - self.state[0])
+        heading_error = (angle_to_target - self.state[2] + np.pi) % (2 * np.pi) - np.pi
+        k_angular = 2.0
+        w = k_angular * heading_error
+        w = np.clip(w, -self.robot_spec.ang_vel_max, self.robot_spec.ang_vel_max)
+
+        # Linear speed reduced if heading error is large
+        if abs(heading_error) > np.pi / 3:
+            ref_speed *= 0.1
+        v = ref_speed * np.cos(heading_error)
+        v = np.clip(v, 0.0, self.robot_spec.lin_vel_max)
+
+        action = np.array([v, w])
+
+        debug_info = DebugInfo(cost=0.0, 
+                               closest_obstacle_list=None, 
+                               step_runtime=0.0, 
+                               monitored_cost=0.0)
+        
+        self.past_states.append(self.state)
+        self.past_actions.append(action)
+        self.cost_timelist.append(0.0)
+        self.solver_time_timelist.append(0.0)
+        
+        return [action], ref_states, current_refs, debug_info
