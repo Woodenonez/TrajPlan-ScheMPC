@@ -56,7 +56,7 @@ In the script, there are several parameters that can be changed:
 - `ignore_speed_ref`: <bool> whether to ignore the speed reference from the global path when using the MPC controller.
 - `recording`: <bool> whether to record the simulation.
 
-By default, the script runs both the scheduler and the MPC controller on the "4Small" test case.
+By default, the script runs both the scheduler and the MPC controller on the "4Small" test case. For the same test case, the schedule needs to be generated only once and must be before running the controller. Only if `controller` is true, the simulation will be run.
 
 <!-- ## ROS Simulation
 [ROS XXX](https://github.com/) [Not Yet] -->
