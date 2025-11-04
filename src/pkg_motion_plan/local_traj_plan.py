@@ -136,7 +136,7 @@ class LocalTrajPlanner:
 
         self._idle = False
 
-    def get_local_ref(self, current_time: float, current_pos: PathNode, idx_check_range:int=10, external_ref_speed:Optional[float]=None):
+    def get_local_ref(self, current_time: float, current_pos: PathNode, idx_check_range:int=10, external_ref_speed:Optional[float]=None, ignore_speed_ref:bool=False):
         """Get the local reference from the current time and position.
 
         Args:
@@ -157,6 +157,8 @@ class LocalTrajPlanner:
             ref_states, ref_speed, done = self.get_local_ref_from_linear_sampling(current_time, current_pos, idx_check_range)
         else:
             raise ValueError('Sampling method not supported.')
+        if ignore_speed_ref:
+            ref_speed = None
         if (ref_speed is not None) and (ref_speed > 1e-6):
             ref_states = self.downsample_ref_states(ref_states, self.traj_gen.speed, ref_speed)
         if external_ref_speed is not None:

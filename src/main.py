@@ -9,7 +9,7 @@ src_path = os.path.join(project_root, "src")
 data_path = os.path.join(project_root, "data")
 
 
-def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, recording=False):
+def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False):
     if scheduler:
         from pkg_sche.sp_comsat.Compo_slim import Compo_slim
         instance, optimum, running_time, len_previous_routes, paths_changed, solution = Compo_slim(problem)
@@ -42,7 +42,7 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         with open(f"{data_path}/test_cases/{problem}.json",'r') as read_file:
             data = json.load(read_file)
             EnvFolder = data['test_data']['Environment']
-        run_mpc(EnvFolder, naive_tracker=naive_tracker, recording=recording)
+        run_mpc(EnvFolder, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref, recording=recording)
 
 if __name__ == "__main__":
     problem = '4Small' # SAFETY COEFF 20
@@ -52,7 +52,8 @@ if __name__ == "__main__":
         problem,
         scheduler = True,
         controller= True,
-        naive_tracker= True,
+        naive_tracker= False,
+        ignore_speed_ref= False,
         recording=False
     )
 

@@ -331,7 +331,7 @@ class TrajectoryTracker:
 
 
     def run_step(self, static_obstacles: list[list[PathNode]], full_dyn_obstacle_list:Optional[list]=None, other_robot_states:Optional[list]=None, 
-                 map_updated:bool=True, report_cost:bool=False):
+                 map_updated:bool=True, report_cost:bool=False, ignore_speed_ref:bool=False):
         """Run the trajectory planner for one step given the surrounding environment.
 
         Args:
@@ -361,7 +361,7 @@ class TrajectoryTracker:
             self._stc_constraints, self._closest_obstacle_list = self.get_stc_constraints(static_obstacles)
             self._map_loaded = True
         dyn_constraints = self.get_dyn_constraints(full_dyn_obstacle_list)
-        actions, pred_states, ref_states, cost, monitored_cost = self._run_step(self._stc_constraints, dyn_constraints, other_robot_states, report_cost)
+        actions, pred_states, ref_states, cost, monitored_cost = self._run_step(self._stc_constraints, dyn_constraints, other_robot_states, report_cost, ignore_speed_ref=ignore_speed_ref)
         step_runtime = timer()-step_time_start
         debug_info = DebugInfo(cost=cost, 
                                closest_obstacle_list=self._closest_obstacle_list, 
@@ -369,7 +369,7 @@ class TrajectoryTracker:
                                monitored_cost=monitored_cost)
         return actions, pred_states, ref_states, debug_info
 
-    def _run_step(self, stc_constraints: list, dyn_constraints: list, other_robot_states:Optional[list]=None, report_cost:bool=False):
+    def _run_step(self, stc_constraints: list, dyn_constraints: list, other_robot_states:Optional[list]=None, report_cost:bool=False, ignore_speed_ref:bool=False):
         """Run the trajectory planner for one step, wrapped by `run_step`.
 
         Args:
@@ -395,7 +395,7 @@ class TrajectoryTracker:
 
         ### Get reference velocities ###
         dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
-        if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing:
+        if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing and (not ignore_speed_ref):
             speed_ref = dist_to_goal / self.N_hor / self.ts * 2
             speed_ref = min(speed_ref, self.robot_spec.lin_vel_max)
             speed_ref_list = [speed_ref]*self.N_hor

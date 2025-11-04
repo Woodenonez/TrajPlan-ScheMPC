@@ -19,7 +19,7 @@ from configs import CircularRobotSpecification
 from visualizer.object import CircularVehicleVisualizer
 from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
-def run_mpc(EnvFolder, naive_tracker=False, recording=False):
+def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=False):
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
     CFG_FNAME = "mpc_fast.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
@@ -119,12 +119,14 @@ def run_mpc(EnvFolder, naive_tracker=False, recording=False):
             if controller.idle:
                 main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
                 continue
-
+            
             ref_states, ref_speed, *_ = planner.get_local_ref(
                 kt*config_mpc.ts, 
                 (float(robot.state[0]), float(robot.state[1])), 
-                idx_check_range=5)
-            print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed, 4)}, next goal:{planner._current_target_node}") # XXX
+                idx_check_range=5,
+                ignore_speed_ref=ignore_speed_ref
+            )
+            print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
             controller.set_current_state(robot.state)
             controller.set_ref_states(ref_states, ref_speed=ref_speed)
             if naive_tracker:
@@ -133,7 +135,7 @@ def run_mpc(EnvFolder, naive_tracker=False, recording=False):
                 (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
                                                            full_dyn_obstacle_list=None,
                                                            other_robot_states=other_robot_states,
-                                                           map_updated=True, report_cost=False)
+                                                           map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
             
             controller.report_cost(debug_info['cost'],
                                    debug_info['step_runtime'],

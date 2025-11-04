@@ -44,7 +44,19 @@ python src/build_solver.py
 After this, a new directory *mpc_solver* will appear and contain the solver. Then, you are good to go :)
 
 ## Use Case
-Run *main.py* for ... 
+Run *main.py* for the simulation with both the scheduler and the MPC controller (after generating the solver):
+```
+python src/main.py
+```
+In the script, there are several parameters that can be changed:
+- `problem`: <src> the name of the test case to be used. The test cases are stored in "data/test_cases".
+- `scheduler`: <bool> whether to run the scheduler or not.
+- `controller`: <bool> whether to run the MPC controller or not.
+- `naive_tracker`: <bool> whether to use a naive tracker instead of the MPC controller.
+- `ignore_speed_ref`: <bool> whether to ignore the speed reference from the global path when using the MPC controller.
+- `recording`: <bool> whether to record the simulation.
+
+By default, the script runs both the scheduler and the MPC controller on the "4Small" test case.
 
 <!-- ## ROS Simulation
 [ROS XXX](https://github.com/) [Not Yet] -->
