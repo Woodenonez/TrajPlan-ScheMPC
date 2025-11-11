@@ -2,6 +2,7 @@
 /.vscode
 /.mypy_cache
 /archived
+.venv/
 
 __pycache__
 

@@ -2,13 +2,13 @@ from typing import Any, Optional
 
 import numpy as np
 
-from src.basic_motion_model import motion_model as momo
-from src.configs import CircularRobotSpecification, MpcConfiguration
+from basic_motion_model import motion_model as momo
+from configs import CircularRobotSpecification, MpcConfiguration
 
 # Type hinting
-from src.pkg_mpc_tracker.trajectory_tracker import TrajectoryTracker
-from src.pkg_motion_plan.local_traj_plan import LocalTrajPlanner
-from src.visualizer.object import ObjectVisualizer
+from pkg_mpc_tracker.trajectory_tracker import TrajectoryTracker
+from pkg_motion_plan.local_traj_plan import LocalTrajPlanner
+from visualizer.object import ObjectVisualizer
 
 
 MAX_NUMBER_OF_ROBOTS = 10

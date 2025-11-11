@@ -6,20 +6,20 @@ import datetime
 import numpy as np
 import pandas as pd # type: ignore
 
-from src.basic_motion_model.motion_model import UnicycleModel
+from basic_motion_model.motion_model import UnicycleModel
 
-from src.pkg_motion_plan.global_path_coordinate import GlobalPathCoordinator
-from src.pkg_motion_plan.local_traj_plan import LocalTrajPlanner
-from src.pkg_mpc_tracker.trajectory_tracker import TrajectoryTracker
-from src.pkg_robot.robot import RobotManager
+from pkg_motion_plan import GlobalPathCoordinator
+from pkg_motion_plan import LocalTrajPlanner
+from pkg_mpc_tracker import TrajectoryTracker
+from pkg_robot.robot import RobotManager
 
-from src.configs import MpcConfiguration
-from src.configs import CircularRobotSpecification
+from configs import MpcConfiguration
+from configs import CircularRobotSpecification
 
-from src.visualizer.object import CircularVehicleVisualizer
-from src.visualizer.mpc_plot import MpcPlotInLoop # type: ignore
+from visualizer.object import CircularVehicleVisualizer
+from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
-def run_mpc(EnvFolder, recording=False):
+def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=False):
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
     CFG_FNAME = "mpc_fast.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
@@ -119,18 +119,24 @@ def run_mpc(EnvFolder, recording=False):
             if controller.idle:
                 main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
                 continue
-
+            
             ref_states, ref_speed, *_ = planner.get_local_ref(
                 kt*config_mpc.ts, 
                 (float(robot.state[0]), float(robot.state[1])), 
-                idx_check_range=5)
-            print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed, 4)}, next goal:{planner._current_target_node}") # XXX
+                idx_check_range=5,
+                ignore_speed_ref=ignore_speed_ref
+            )
+            print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
             controller.set_current_state(robot.state)
             controller.set_ref_states(ref_states, ref_speed=ref_speed)
-            (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
+            if naive_tracker:
+                (actions, pred_states, current_refs, debug_info) = controller.run_naive_step()
+            else:
+                (actions, pred_states, current_refs, debug_info) = controller.run_step(static_obstacles=static_obstacles,
                                                            full_dyn_obstacle_list=None,
                                                            other_robot_states=other_robot_states,
-                                                           map_updated=True, report_cost=False)
+                                                           map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
+            
             controller.report_cost(debug_info['cost'],
                                    debug_info['step_runtime'],
                                    debug_info['monitored_cost'],
@@ -142,8 +148,8 @@ def run_mpc(EnvFolder, recording=False):
                 actual_timetable[rid][-1] = (kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node))
 
             ### Real run
-            if (np.linalg.norm(robot.state[:2] - ref_states[-1][:2]) > 0.3):
-                if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - ref_states[-1][:2]) > 0.8) or planner.idle:
+            if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
+                if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.8) or planner.idle:
                     robot.step(actions[-1])
             robot_manager.set_pred_states(rid, np.asarray(pred_states))
 

@@ -7,7 +7,7 @@ from .casadi_build import mpc_cost as mc
 from .casadi_build.builder_panoc import PanocBuilder, PenaltyTerms
 from .casadi_build.mpc_cost import CostTerms
 
-from src.configs import MpcConfiguration, CircularRobotSpecification
+from configs import MpcConfiguration, CircularRobotSpecification
 
 
 class MonitoredCost(TypedDict):

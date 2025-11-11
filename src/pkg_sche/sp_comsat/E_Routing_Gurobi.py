@@ -3,7 +3,7 @@ from gurobipy import *
 # from support_functions import json_parser
 # import networkx as nx
 # from itertools import permutations,combinations
-from Scheduler_MPC.sp_comsat.classes import Route
+from .classes import Route
 import math
 # from time import time as tm
 

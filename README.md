@@ -1,20 +1,37 @@
 # Collision-Free Control for A Robot Fleet with Time-Constrained Scheduling
-Related design project: Time-Constrained Scheduling and Collision-Free Control for A Fleet of Mobile Robots (2023).
+
 
 ## Publication
-The paper is available: [Not Yet] \
+The paper is accepted by the IEEE/SICE International Symposium on System Integration (SII 2026): [arXiv](https://arxiv.org/abs/2510.23129) \
 Bibtex citation:
 ```
-not yet
+@misc{roselli_2025_schempc,
+      title={Combining High Level Scheduling and Low Level Control to Manage Fleets of Mobile Robots}, 
+      author={Sabino Francesco Roselli and Ze Zhang and Knut Åkesson},
+      year={2025},
+      eprint={2510.23129},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2510.23129}, 
+}
 ```
 
 ![Example](doc/cover.png "Example")
 
 ## Quick Start
+### Gurobi
+The scheduler is formulated as a MILP and solved using [Gurobi Optimizer](https://www.gurobi.com/). We recommend using the [academic named-user license](https://support.gurobi.com/hc/en-us/articles/13207658935185-How-do-I-retrieve-an-Academic-Named-User-license) for convenience. 
+
+
 ### OpEn
 The NMPC formulation is solved using open source implementation of PANOC, namely [OpEn](https://alphaville.github.io/optimization-engine/). Follow the [installation instructions](https://alphaville.github.io/optimization-engine/docs/installation) before proceeding. 
 
 ### Install dependencies
+It is recommended to use UV for managing Python environments. Create a new environment and install the dependencies using
+```
+uv pip install -r requirements.txt
+```
+or using pip directly
 ```
 pip install -r requirements.txt
 ```
@@ -27,10 +44,22 @@ python src/build_solver.py
 After this, a new directory *mpc_solver* will appear and contain the solver. Then, you are good to go :)
 
 ## Use Case
-Run *main.py* for ... 
+Run *main.py* for the simulation with both the scheduler and the MPC controller (after generating the solver):
+```
+python src/main.py
+```
+In the script, there are several parameters that can be changed:
+- `problem`: <src> the name of the test case to be used. The test cases are stored in "data/test_cases".
+- `scheduler`: <bool> whether to run the scheduler or not.
+- `controller`: <bool> whether to run the MPC controller or not.
+- `naive_tracker`: <bool> whether to use a naive tracker instead of the MPC controller.
+- `ignore_speed_ref`: <bool> whether to ignore the speed reference from the global path when using the MPC controller.
+- `recording`: <bool> whether to record the simulation.
 
-## ROS Simulation
-[ROS XXX](https://github.com/) [Not Yet]
+By default, the script runs both the scheduler and the MPC controller on the "4Small" test case. For the same test case, the schedule needs to be generated only once and must be before running the controller. Only if `controller` is true, the simulation will be run.
+
+<!-- ## ROS Simulation
+[ROS XXX](https://github.com/) [Not Yet] -->
 
 ## Components
 The whole system is mainly composed of five components:
