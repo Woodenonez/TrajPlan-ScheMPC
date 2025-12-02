@@ -1,23 +1,6 @@
 # Collision-Free Control for A Robot Fleet with Time-Constrained Scheduling
 
-<span style="color:red">This branch is for Python 3.6 compatibility on the MPC part and is not guaranteed to work for the whole pipeline</span>
-
-## Publication
-The paper is accepted by the IEEE/SICE International Symposium on System Integration (SII 2026): [arXiv](https://arxiv.org/abs/2510.23129) \
-Bibtex citation:
-```
-@misc{roselli_2025_schempc,
-      title={Combining High Level Scheduling and Low Level Control to Manage Fleets of Mobile Robots}, 
-      author={Sabino Francesco Roselli and Ze Zhang and Knut Åkesson},
-      year={2025},
-      eprint={2510.23129},
-      archivePrefix={arXiv},
-      primaryClass={cs.RO},
-      url={https://arxiv.org/abs/2510.23129}, 
-}
-```
-
-![Example](doc/cover.png "Example")
+⚠️ **This branch is for Python 3.6 compatibility on the MPC part and is not guaranteed to work for the whole pipeline.**
 
 ## Quick Start
 ### Gurobi
@@ -28,13 +11,13 @@ The scheduler is formulated as a MILP and solved using [Gurobi Optimizer](https:
 The NMPC formulation is solved using open source implementation of PANOC, namely [OpEn](https://alphaville.github.io/optimization-engine/). Follow the [installation instructions](https://alphaville.github.io/optimization-engine/docs/installation) before proceeding. 
 
 ### Install dependencies
-It is recommended to use UV for managing Python environments. Create a new environment and install the dependencies using
-```
-uv pip install -r requirements.txt
-```
-or using pip directly
+It is recommended to use virtual environments. Create a new environment and install the dependencies using
 ```
 pip install -r requirements.txt
+```
+or using conda
+```
+conda env create -f environment.yml
 ```
 
 ### Generate MPC solver
@@ -59,8 +42,6 @@ In the script, there are several parameters that can be changed:
 
 By default, the script runs both the scheduler and the MPC controller on the "4Small" test case. For the same test case, the schedule needs to be generated only once and must be before running the controller. Only if `controller` is true, the simulation will be run.
 
-<!-- ## ROS Simulation
-[ROS XXX](https://github.com/) [Not Yet] -->
 
 ## Components
 The whole system is mainly composed of five components:
