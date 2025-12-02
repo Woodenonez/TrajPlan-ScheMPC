@@ -1,5 +1,6 @@
 # Collision-Free Control for A Robot Fleet with Time-Constrained Scheduling
 
+<span style="color:red">This branch is for Python 3.6 compatibility on the MPC part and is not guaranteed to work for the whole pipeline</span>
 
 ## Publication
 The paper is accepted by the IEEE/SICE International Symposium on System Integration (SII 2026): [arXiv](https://arxiv.org/abs/2510.23129) \

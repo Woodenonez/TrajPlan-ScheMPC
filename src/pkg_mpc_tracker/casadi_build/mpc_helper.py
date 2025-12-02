@@ -1,3 +1,4 @@
+from typing import List
 import casadi.casadi as cs # type: ignore
 
 
@@ -34,7 +35,7 @@ def dist_to_lineseg(point: cs.SX, line_segment: cs.SX) -> cs.SX:
     distance = cs.norm_2(temp_vec)
     return distance
 
-def inside_ellipses(point: cs.SX, ellipse_param: list[cs.SX]) -> cs.SX:
+def inside_ellipses(point: cs.SX, ellipse_param: List[cs.SX]) -> cs.SX:
     """Check if a point is inside a set of ellipses.
     
     Args:

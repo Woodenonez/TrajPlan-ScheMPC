@@ -5,7 +5,7 @@ import math
 import warnings
 import itertools
 from timeit import default_timer as timer
-from typing import Callable, Optional, TypedDict
+from typing import Callable, Optional, Tuple, List
 # External import
 import numpy as np
 from scipy.spatial import ConvexHull # type: ignore
@@ -14,19 +14,25 @@ from configs import MpcConfiguration, CircularRobotSpecification
 from .cost_monitor import CostMonitor, MonitoredCost
 
 
-PathNode = tuple[float, float]
+PathNode = Tuple[float, float]
 
 
 class Solver(): # this is not found in the .so file (in ternimal: nm -D  navi_test.so)
     import opengen as og # type: ignore
-    def run(self, p: list, initial_guess=None, initial_lagrange_multipliers=None, initial_penalty=None) -> og.opengen.tcp.solver_status.SolverStatus: pass
+    def run(self, p: List, initial_guess=None, initial_lagrange_multipliers=None, initial_penalty=None) -> og.opengen.tcp.solver_status.SolverStatus: pass
 
 
-class DebugInfo(TypedDict):
-    cost: float
-    closest_obstacle_list: list[list[PathNode]]
-    step_runtime: float
-    monitored_cost: Optional[MonitoredCost]
+class DebugInfo(dict):
+    def __init__(self, 
+                 cost: float, 
+                 closest_obstacle_list: List[List[PathNode]], 
+                 step_runtime: float, 
+                 monitored_cost:Optional[MonitoredCost]=None):
+        self.cost = cost
+        self.closest_obstacle_list = closest_obstacle_list
+        self.step_runtime = step_runtime
+        self.monitored_cost = monitored_cost
+        super().__init__(cost=cost, closest_obstacle_list=closest_obstacle_list, step_runtime=step_runtime, monitored_cost=monitored_cost)
 
 
 class TrajectoryTracker:
@@ -149,7 +155,7 @@ class TrajectoryTracker:
         return self._idle
 
 
-    def get_stc_constraints(self, static_obstacles: list[list[PathNode]]) -> tuple[list, list[list[PathNode]]]:
+    def get_stc_constraints(self, static_obstacles: List[List[PathNode]]) -> Tuple[List, List[List[PathNode]]]:
         n_stc_obs = self.config.Nstcobs * self.config.nstcobs
         stc_constraints = [0.0] * n_stc_obs
         map_obstacle_list = self.get_closest_n_stc_obstacles(static_obstacles)
@@ -158,7 +164,7 @@ class TrajectoryTracker:
             stc_constraints[i*self.config.nstcobs : (i+1)*self.config.nstcobs] = (b+a0+a1)
         return stc_constraints, map_obstacle_list
     
-    def get_closest_n_stc_obstacles(self, static_obstacles: list[list[PathNode]]) -> list[list[PathNode]]:
+    def get_closest_n_stc_obstacles(self, static_obstacles: List[List[PathNode]]) -> List[List[PathNode]]:
         short_obs_list = []
         dists_to_obs = []
         if len(static_obstacles) <= self.config.Nstcobs:
@@ -330,7 +336,7 @@ class TrajectoryTracker:
         return self._idle
 
 
-    def run_step(self, static_obstacles: list[list[PathNode]], full_dyn_obstacle_list:Optional[list]=None, other_robot_states:Optional[list]=None, 
+    def run_step(self, static_obstacles: List[List[PathNode]], full_dyn_obstacle_list:Optional[List]=None, other_robot_states:Optional[List]=None, 
                  map_updated:bool=True, report_cost:bool=False, ignore_speed_ref:bool=False):
         """Run the trajectory planner for one step given the surrounding environment.
 

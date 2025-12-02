@@ -1,4 +1,4 @@
-from typing import Callable, TypedDict, Union, cast
+from typing import Callable, Tuple, Union, cast, List
 from copy import deepcopy
 
 import casadi as ca # type: ignore
@@ -10,7 +10,7 @@ from . import mpc_cost as mc
 from configs import MpcConfiguration, CircularRobotSpecification
 
 
-class PenaltyTerms(TypedDict):
+class PenaltyTerms(dict):
     pos: Union[float, ca.SX]
     vel: Union[float, ca.SX]
     theta: Union[float, ca.SX]
@@ -21,6 +21,30 @@ class PenaltyTerms(TypedDict):
     rpd: Union[float, ca.SX]
     acc_penalty: Union[float, ca.SX]
     w_acc_penalty: Union[float, ca.SX]
+    def __init__(self,
+                 pos: Union[float, ca.SX],
+                 vel: Union[float, ca.SX],
+                 theta: Union[float, ca.SX],
+                 v: Union[float, ca.SX],
+                 w: Union[float, ca.SX],
+                 posN: Union[float, ca.SX],
+                 thetaN: Union[float, ca.SX],
+                 rpd: Union[float, ca.SX],
+                 acc_penalty: Union[float, ca.SX],
+                 w_acc_penalty: Union[float, ca.SX]):
+            self.pos = pos
+            self.vel = vel
+            self.theta = theta
+            self.v = v
+            self.w = w
+            self.posN = posN
+            self.thetaN = thetaN
+            self.rpd = rpd
+            self.acc_penalty = acc_penalty
+            self.w_acc_penalty = w_acc_penalty
+            super().__init__(pos=pos, vel=vel, theta=theta, v=v, w=w,
+                            posN=posN, thetaN=thetaN, rpd=rpd,
+                            acc_penalty=acc_penalty, w_acc_penalty=w_acc_penalty)
 
 
 class PanocBuilder:
@@ -101,11 +125,11 @@ class PanocBuilder:
         self._motion_model = motion_model
 
     def step_cost(self, step_in_horizon: int, action: ca.SX, last_state: ca.SX,
-                  penalty_terms: PenaltyTerms, q_stcobs: list[ca.SX], q_dynobs: list[ca.SX],
+                  penalty_terms: PenaltyTerms, q_stcobs: List[ca.SX], q_dynobs: List[ca.SX],
                   ref_states: ca.SX, ref_speed: ca.SX, 
                   other_robot_positions: ca.SX, other_robot_pred_positions: ca.SX,
                   static_obstacles: ca.SX, dynamic_obstacles: ca.SX,
-                  critical_step:int=100) -> tuple[ca.SX, mc.CostTerms, list]:
+                  critical_step:int=100) -> Tuple[ca.SX, mc.CostTerms, List]:
         """Calculate the cost terms at the selected time step in the predictive horizon.
 
         Args:

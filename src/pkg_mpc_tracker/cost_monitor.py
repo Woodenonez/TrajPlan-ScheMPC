@@ -1,4 +1,4 @@
-from typing import Callable, Optional, TypedDict
+from typing import Callable, Optional, List, Union, Tuple
 from timeit import default_timer as timer
 
 import casadi as ca # type: ignore
@@ -10,12 +10,19 @@ from .casadi_build.mpc_cost import CostTerms
 from configs import MpcConfiguration, CircularRobotSpecification
 
 
-class MonitoredCost(TypedDict):
-    total_cost: CostTerms
-    step_cost_list: list[CostTerms]
-    terminal_cost: float
-    cost_acc: float
-    cost_w_acc: float
+class MonitoredCost(dict):
+    def __init__(self, 
+                 total_cost: CostTerms, 
+                 step_cost_list: List[CostTerms], 
+                 terminal_cost: float, 
+                 cost_acc: float, 
+                 cost_w_acc: float):
+        self.total_cost = total_cost
+        self.step_cost_list = step_cost_list
+        self.terminal_cost = terminal_cost
+        self.cost_acc = cost_acc
+        self.cost_w_acc = cost_w_acc
+        super().__init__(total_cost=total_cost, step_cost_list=step_cost_list, terminal_cost=terminal_cost, cost_acc=cost_acc, cost_w_acc=cost_w_acc)
 
 
 class CostMonitor:
