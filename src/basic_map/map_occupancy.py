@@ -1,3 +1,5 @@
+from typing import Dict, List, Tuple, Optional
+
 import numpy as np
 from PIL import Image # type: ignore
 from matplotlib.axes import Axes # type: ignore
@@ -5,7 +7,7 @@ from matplotlib.axes import Axes # type: ignore
 from .map_tools import blob_bounding
 
 
-PathNode = tuple[float, float]
+PathNode = Tuple[float, float]
 
 
 class OccupancyMap:
@@ -53,7 +55,7 @@ class OccupancyMap:
         map_data = np.array(img.convert('L'))
         return cls(map_data)
 
-    def get_geometric_map(self, bounding_degree=4) -> tuple[list[PathNode], list[list[PathNode]]]:
+    def get_geometric_map(self, bounding_degree=4) -> Tuple[List[PathNode], List[List[PathNode]]]:
         boundary_coords = [(0.0, 0.0), 
                            (0.0, float(self.height)), 
                            (float(self.width), float(self.height)), 

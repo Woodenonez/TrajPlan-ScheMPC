@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Union
+from typing import Union, List, Tuple
 
 import math
 import matplotlib.patches as patches # type: ignore
@@ -11,7 +11,7 @@ from shapely.geometry import JOIN_STYLE # type: ignore
 from matplotlib.axes import Axes # type: ignore
 
 
-PathNode = tuple[float, float]
+PathNode = Tuple[float, float]
 
 
 class PlainGeometry(ABC):
@@ -69,7 +69,7 @@ class PlainPoint(PlainGeometry):
 class PlainPolygon(PlainGeometry):
     """A plain polygon class without any dependencies.
     Certain functions need the shapely library."""
-    vertices: list[PlainPoint]
+    vertices: List[PlainPoint]
     angle: float = 0
 
     @property
@@ -81,14 +81,14 @@ class PlainPolygon(PlainGeometry):
         """[shapely] Return the centroid of the polygon."""
         return PlainPoint.from_shapely(self.to_shapely().centroid)
 
-    def __call__(self) -> list[PathNode]:
+    def __call__(self) -> List[PathNode]:
         return [x() for x in self.vertices]
 
     def __getitem__(self, idx) -> PlainPoint:
         return self.vertices[idx]
 
     @classmethod
-    def from_list_of_tuples(cls, vertices: list[PathNode]):
+    def from_list_of_tuples(cls, vertices: List[PathNode]):
         return cls([PlainPoint(*v) for v in vertices]) 
     
     @classmethod
@@ -146,10 +146,10 @@ class PlainEllipse(PlainGeometry):
         contains_point: check if the ellipse contains the point
     """
     center: PlainPoint
-    radii: tuple[float, float]
+    radii: Tuple[float, float]
     angle: float
 
-    def __call__(self) -> tuple[tuple, tuple, float]:
+    def __call__(self) -> Tuple[Tuple[float, float], Tuple[float, float], float]:
         return (self.center(), self.radii, self.angle)
     
     def inflate(self, margin:float) -> 'PlainEllipse': # type: ignore
@@ -204,7 +204,7 @@ class PlainCircle(PlainGeometry):
     center: PlainPoint
     radius: float
 
-    def __call__(self) -> tuple[tuple, float]:
+    def __call__(self) -> Tuple[Tuple, float]:
         return (self.center(), self.radius)
 
     def inflate(self, margin:float) -> 'PlainCircle': # type: ignore

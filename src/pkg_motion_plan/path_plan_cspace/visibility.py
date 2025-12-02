@@ -1,12 +1,13 @@
 import networkx as nx # type: ignore
+from pyparsing import Tuple, List
 from shapely.geometry import Point, Polygon, LineString # type: ignore
 
 
-PathNode = tuple[float, float]
+PathNode = Tuple[float, float]
 
 
 class VisibilityPathFinder:
-    def __init__(self, boundary_coords: list[PathNode], obstacle_list: list[list[PathNode]], verbose=False) -> None:
+    def __init__(self, boundary_coords: List[PathNode], obstacle_list: List[List[PathNode]], verbose=False) -> None:
         self._boundary_polygon = Polygon(boundary_coords)
         self._obstacle_polygons = [Polygon(obs) for obs in obstacle_list]
         self._all_vertices = [x for y in obstacle_list for x in y]
@@ -27,7 +28,7 @@ class VisibilityPathFinder:
                     G.add_edge(i+2, j+2, weight=line.length) # 0, 1 are start and end points
         return G
 
-    def get_ref_path(self, start: PathNode, end: PathNode) -> tuple[list[PathNode], list[float]]:
+    def get_ref_path(self, start: PathNode, end: PathNode) -> Tuple[List[PathNode], List[float]]:
         """Get the reference path from start to end.
 
         Args:

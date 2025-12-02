@@ -1,6 +1,6 @@
 import copy
 from heapq import heappush, heappop
-from typing import Any
+from typing import Any, Tuple, List
 
 import networkx as nx # type: ignore
 
@@ -10,7 +10,7 @@ class DijkstraPathPlanner:
         """Find the shortest path between two nodes in a graph based on Dijkstra's algorithm."""
         self.G = graph
 
-    def k_shortest_paths(self, source, target, k=1, weight_key='weight') -> tuple[list[float], list[list[Any]]]:
+    def k_shortest_paths(self, source, target, k=1, weight_key='weight') -> Tuple[List[float], List[List[Any]]]:
         """Returns the k-shortest paths from source to target in a weighted graph G.
 
         Args:
@@ -87,7 +87,7 @@ class DijkstraPathPlanner:
         
         return lengths, paths
 
-    def k_shortest_paths_with_coords(self, source, target, k=1, weight_key='weight', position_key='position') -> tuple[list[float], list[list[tuple[float, float, Any]]]]:
+    def k_shortest_paths_with_coords(self, source, target, k=1, weight_key='weight', position_key='position') -> Tuple[List[float], List[List[Tuple[float, float, Any]]]]:
         """Find the k shortest paths from source to target with coordinates.
 
         Args:

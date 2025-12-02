@@ -1,7 +1,7 @@
 # type: ignore
 
 import math
-from typing import Optional, Union, TypedDict
+from typing import Optional, Union, Tuple, Dict, List
 
 import cv2
 import numpy as np
@@ -19,15 +19,12 @@ from basic_map.map_geometric import GeometricMap
 from basic_map.graph import NetGraph
 
 
-class SaveParams(TypedDict):
-    fps: int
-    dpi: int
-    codec: str
-    frame_size: tuple[int, int]
-    skip_frame: int
+class SaveParams(dict):
+    def __init__(self, fps: int, dpi: int, codec: str, frame_size: Tuple[int, int], skip_frame: int):
+        super().__init__(fps=fps, dpi=dpi, codec=codec, frame_size=frame_size, skip_frame=skip_frame)
 
 
-def figure_formatter(window_title:str, num_axes_per_column:list=None, num_axes_per_row:list=None, figure_size:tuple=None):
+def figure_formatter(window_title:str, num_axes_per_column:List[int]=None, num_axes_per_row:List[int]=None, figure_size:Tuple[int, int]=None):
     """ Generate a figure with a given format.
 
     Arguments:
@@ -86,7 +83,7 @@ def figure_formatter(window_title:str, num_axes_per_column:list=None, num_axes_p
 
 
 class MpcPlotInLoop:
-    def __init__(self, config: CircularRobotSpecification, map_only=False, fig_ratio:float=1.0, save_to_path:Optional[str]=None, save_params:Optional[Union[SaveParams, dict]]=None) -> None:
+    def __init__(self, config: CircularRobotSpecification, map_only=False, fig_ratio:float=1.0, save_to_path:Optional[str]=None, save_params:Optional[Union[SaveParams, Dict]]=None) -> None:
         """
         Args:
             config: The configuration of the robot.
@@ -154,7 +151,7 @@ class MpcPlotInLoop:
         self._btn_pause.ax.set_facecolor('lightgreen')
         self._btn_play.ax.set_facecolor('lightgray')
 
-    def init_video_writer(self, save_to_path: Optional[str], save_params: Optional[Union[SaveParams, dict]]):
+    def init_video_writer(self, save_to_path: Optional[str], save_params: Optional[Union[SaveParams, Dict]]):
         """Initialize the video writer if the path is not None.
 
         Attributes:

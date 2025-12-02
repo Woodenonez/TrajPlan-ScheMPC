@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Tuple, List
 
 import pandas as pd # type: ignore
 import networkx as nx # type: ignore
@@ -12,7 +12,7 @@ from basic_map.map_occupancy import OccupancyMap
 from basic_obstacle.geometry_plain import PlainPolygon
 
 
-PathNode = tuple[float, float]
+PathNode = Tuple[float, float]
 
 
 class GlobalPathCoordinator:
@@ -59,7 +59,7 @@ class GlobalPathCoordinator:
         return self._total_schedule
     
     @property
-    def robot_ids(self) -> list:
+    def robot_ids(self) -> List:
         return self._robot_ids
     
     @property
@@ -81,7 +81,7 @@ class GlobalPathCoordinator:
         return cls(total_schedule)
     
     @classmethod
-    def from_dict(cls, schedule_dict: dict):
+    def from_dict(cls, schedule_dict: Dict):
         """Load the total schedule from a dictionary."""
         total_schedule = pd.DataFrame(schedule_dict)
         return cls(total_schedule)
@@ -102,7 +102,7 @@ class GlobalPathCoordinator:
     def load_graph_from_json(self, json_path: str):
         self.load_graph(NetGraph.from_json(json_path))
 
-    def load_map(self, boundary_coords: list[PathNode], obstacle_list: list[list[PathNode]], rescale:Optional[float]=None, inflation_margin:Optional[float]=None):
+    def load_map(self, boundary_coords: List[PathNode], obstacle_list: List[List[PathNode]], rescale:Optional[float]=None, inflation_margin:Optional[float]=None):
         self._current_map = GeometricMap.from_raw(boundary_coords, obstacle_list, rescale=rescale)
         if inflation_margin is not None:
             self._inflated_map = self.inflate_map(self._current_map, inflation_margin)
@@ -117,13 +117,13 @@ class GlobalPathCoordinator:
     def load_img_map(self, img_path: str):
         self.img_map = OccupancyMap.from_image(img_path)
 
-    def get_node_id(self, coord: tuple) -> Optional[Any]:
+    def get_node_id(self, coord: Tuple) -> Optional[Any]:
         """Get node ID by coordinates"""
         assert self._G is not None, "The graph is not loaded."
         node_ids = self._G.get_node_ids(coord)
         return node_ids[0] if node_ids else None
 
-    def get_schedule_with_node_index(self, robot_id: int) -> tuple[list, Optional[list[float]], bool]:
+    def get_schedule_with_node_index(self, robot_id: int) -> Tuple[List, Optional[List[float]], bool]:
         """Get the schedule of a robot.
         
         Returns:
@@ -156,7 +156,7 @@ class GlobalPathCoordinator:
             whole_path = False
         return path_nodes, path_times, whole_path
         
-    def get_robot_schedule(self, robot_id: int, time_offset:float=0.0, position_key="position") -> tuple[list[tuple[float, float]], Optional[list[float]]]:
+    def get_robot_schedule(self, robot_id: int, time_offset:float=0.0, position_key="position") -> Tuple[List[Tuple[float, float]], Optional[List[float]]]:
         """
         Args:
             time_offset: The delayed time offset of the schedule.
@@ -174,7 +174,7 @@ class GlobalPathCoordinator:
         path_nodes, path_times, whole_path = self.get_schedule_with_node_index(robot_id)
         
         if whole_path:
-            path_coords:list[tuple[float, float]] = [self._G.nodes[node_id][position_key] for node_id in path_nodes]
+            path_coords:List[Tuple[float, float]] = [self._G.nodes[node_id][position_key] for node_id in path_nodes]
         if not whole_path:
             source = path_nodes[0]
             target = path_nodes[1]
@@ -216,7 +216,7 @@ class GlobalPathCoordinator:
             shortest_path = paths[0]
         else:
             raise NotImplementedError(f"Algorithm {algorithm} is not implemented.")
-        section_lengths:list[float] = [graph.edges[shortest_path[i], shortest_path[i+1]]['weight'] for i in range(len(shortest_path)-1)]
+        section_lengths:List[float] = [graph.edges[shortest_path[i], shortest_path[i+1]]['weight'] for i in range(len(shortest_path)-1)]
         return shortest_path, section_lengths
     
 

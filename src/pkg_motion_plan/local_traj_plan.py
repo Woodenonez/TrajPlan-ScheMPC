@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Any
+from typing import Dict, Optional, Any, List, Tuple
 
 import numpy as np
 from scipy import interpolate # type: ignore
@@ -9,8 +9,8 @@ from ._ref_traj_generation import TrajectoryGeneration
 from .path_plan_cspace import visibility # optional if don't need to use the local replanner
 
 
-PathNode = tuple[float, float]
-TrajNode = tuple[float, float, float]
+PathNode = Tuple[float, float]
+TrajNode = Tuple[float, float, float]
 
 class LocalTrajPlanner:
     """The local planner for each individual robot takes path nodes and ETAs as inputs, and outputs local reference.
@@ -40,19 +40,19 @@ class LocalTrajPlanner:
 
         self.path_planner:Optional[Any] = None
 
-        self._ref_path:Optional[list[PathNode]] = None
-        self._ref_path_time:Optional[list[float]] = None
+        self._ref_path:Optional[List[PathNode]] = None
+        self._ref_path_time:Optional[List[float]] = None
 
         self.traj_gen = TrajectoryGeneration()
         self.traj_gen.set_sample_time(self.ts)
 
         self._ref_speed:Optional[float] = None
-        self._base_traj:Optional[list[TrajNode]] = None
-        self._base_traj_time:Optional[list[float]] = None
+        self._base_traj:Optional[List[TrajNode]] = None
+        self._base_traj_time:Optional[List[float]] = None
 
         self._current_target_node:Optional[PathNode] = None
         self._current_target_node_idx:Optional[int] = None
-        self._base_traj_target_node:Optional[list[PathNode]] = None
+        self._base_traj_target_node:Optional[List[PathNode]] = None
         self._base_traj_docking_idx:Optional[int] = None # the index of the docking point on the base trajectory
 
         self._idle = True
@@ -62,7 +62,7 @@ class LocalTrajPlanner:
         return self._idle
 
     @property
-    def current_target_node(self) -> tuple:
+    def current_target_node(self) -> Tuple:
         assert self._current_target_node is not None
         return self._current_target_node
     
@@ -76,7 +76,7 @@ class LocalTrajPlanner:
         return self._ref_speed
     
     @property
-    def docking_point(self) -> tuple:
+    def docking_point(self) -> Tuple:
         assert self._base_traj is not None
         assert self._base_traj_docking_idx is not None
         return self._base_traj[self._base_traj_docking_idx]
@@ -111,11 +111,11 @@ class LocalTrajPlanner:
         new_states = np.column_stack([new_x, new_y, new_heading])[:n_states, :]
         return new_states
 
-    def load_map(self, boundary_coords: list[PathNode], obstacle_list: list[list[PathNode]]):
+    def load_map(self, boundary_coords: List[PathNode], obstacle_list: List[List[PathNode]]):
         """Load the map for the local path planner."""
         self.path_planner = visibility.VisibilityPathFinder(boundary_coords, obstacle_list, verbose=self.vb)
 
-    def load_path(self, path_coords: list[PathNode], path_times: Optional[list[float]], nomial_speed:Optional[float]=None, method:str='linear'):
+    def load_path(self, path_coords: List[PathNode], path_times: Optional[List[float]], nomial_speed:Optional[float]=None, method:str='linear'):
         """The reference speed is used to generate the base trajectory.
         
         Notes:
@@ -266,7 +266,7 @@ class LocalTrajPlanner:
 
         return ref_states, ref_speed, done
 
-    def get_new_path(self, waypoints: list[PathNode], time_list: list[float]) -> tuple[list[PathNode], list[float]]:
+    def get_new_path(self, waypoints: List[PathNode], time_list: List[float]) -> Tuple[List[PathNode], List[float]]:
         """Get a new path from the given waypoints and time list to avoid static obstacles.
 
         Args:
@@ -300,6 +300,6 @@ class LocalTrajPlanner:
         return new_path, new_time
     
 
-    def plot_schedule(self, ax: Axes, plot_args:dict={'c':'r'}):
+    def plot_schedule(self, ax: Axes, plot_args:Dict={'c':'r'}):
         ax.plot(self.ref_traj[:,0], self.ref_traj[:,1], 'o', markerfacecolor='none', **plot_args)
 

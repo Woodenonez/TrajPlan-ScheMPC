@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, List, Optional, Dict, Tuple
 
 import numpy as np
 
@@ -93,15 +93,14 @@ class RobotManager():
     - `robot_manager.get_XX(robot_id)`: return XX
     """
 
-    ROBOT_ID_LIST:list[int] = []
+    ROBOT_ID_LIST:List[int] = []
 
     def __init__(self) -> None:
-        self._robot_dict:dict[Any, RobotUnit] = {}
+        self._robot_dict:Dict[Any, RobotUnit] = {}
     
     def __call__(self, robot_id) -> RobotUnit:
         return self._robot_dict[robot_id]
     
-    @staticmethod
     def _check_id(f): 
         """Decorator to check if robot_id exists"""
         def wrapper(self, robot_id, *args, **kwargs):
@@ -130,7 +129,7 @@ class RobotManager():
         self.ROBOT_ID_LIST.append(robot.id_)
 
     @_check_id
-    def add_schedule(self, robot_id, current_state: np.ndarray, scheduled_path_coords: list[tuple[float, float]], scheduled_path_times: Optional[list[float]]=None):
+    def add_schedule(self, robot_id, current_state, scheduled_path_coords: List[Tuple[float, float]], scheduled_path_times: Optional[List[float]]=None):
         """Add a schedule for a robot in the manager.
 
         Arguments:

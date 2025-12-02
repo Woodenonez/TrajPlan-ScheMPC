@@ -50,7 +50,7 @@ if __name__ == "__main__":
 
     general_funct(
         problem,
-        scheduler = True,
+        scheduler = False,
         controller= True,
         naive_tracker= False,
         ignore_speed_ref= False,
