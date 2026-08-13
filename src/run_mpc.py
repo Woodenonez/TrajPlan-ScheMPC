@@ -19,7 +19,7 @@ from configs import CircularRobotSpecification
 from visualizer.object import CircularVehicleVisualizer
 from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
-def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=False):
+def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, recording=False):
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
     CFG_FNAME = "mpc_fast.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
@@ -181,7 +181,7 @@ def run_mpc(EnvFolder, naive_tracker=False, ignore_speed_ref=False, recording=Fa
             })
     actual_df = pd.DataFrame(rows)
     actual_df = actual_df.sort_values(['robot_id', 'ETA'])
-    actual_schedule_path = os.path.join(data_dir, "Actual_4Small.csv")
+    actual_schedule_path = os.path.join(data_dir, f"Actual_{problem}.csv")
     actual_df.to_csv(actual_schedule_path, index=False)
     print(f"Actual schedule saved to: {actual_schedule_path}")
 
