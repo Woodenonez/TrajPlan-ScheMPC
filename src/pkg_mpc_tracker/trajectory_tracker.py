@@ -323,10 +323,25 @@ class TrajectoryTracker:
         """
         if external_check:
             self.finishing = True
-            if np.allclose(self.state[:2], self.final_goal[:2], atol=0.5, rtol=0) and abs(self.past_actions[-1][0]) < 0.1:
-                self._idle = True
-                if self.vb:
-                    print(f"[{self.__class__.__name__}-{self.robot_id}] Trajectory tracking finished.")
+            if np.allclose(self.state[:2], self.final_goal[:2], atol=0.5, rtol=0):
+                # The commanded speed on its own is not a reliable arrival test.
+                # The simulation loop stops advancing a robot once it is within
+                # its arrest radius of the reference, which freezes the state and
+                # so pins the command at whatever that state implies -- for the
+                # naive tracker, ref_speed is dist_to_goal/N_hor/ts*2, i.e. half
+                # the remaining distance, which stays above the threshold below
+                # for any robot arrested further out than twice it. The robot
+                # then sits still, in tolerance, never declared finished. Having
+                # actually stopped moving is arrival just as much as having been
+                # commanded to slow down, so either one ends the tracking.
+                stopped = False
+                if len(self.past_states) >= 2:
+                    stopped = bool(np.linalg.norm(np.asarray(self.past_states[-1], dtype=float)[:2] -
+                                                  np.asarray(self.past_states[-2], dtype=float)[:2]) < 1e-3)
+                if abs(self.past_actions[-1][0]) < 0.1 or stopped:
+                    self._idle = True
+                    if self.vb:
+                        print(f"[{self.__class__.__name__}-{self.robot_id}] Trajectory tracking finished.")
         return self._idle
 
 
