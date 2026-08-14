@@ -60,6 +60,19 @@ def cost_inside_cvx_polygon(state: ca.SX, b: ca.SX, a0: ca.SX, a1: ca.SX, weight
     assert cost.shape == (1,1)
     return cost
 
+def cost_inside_cvx_polygon_smooth(state: ca.SX, b: ca.SX, a0: ca.SX, a1: ca.SX, weight:Union[ca.SX, float]=1.0, beta: float = 10.0) -> ca.SX:
+    """Smooth counterpart of `cost_inside_cvx_polygon` for gradient-based solvers.
+
+    Unlike the original, whose indicator is a product of clamped residuals and therefore
+    both non-smooth and identically flat outside the polygon, this scores the metric
+    penetration depth from `smooth_cvx_intrusion`. Depth is expressed in centimetres
+    before squaring, keeping the same cost resolution convention as the original.
+    """
+    intrusion = smooth_cvx_intrusion(state, b, a0, a1, beta=beta)
+    cost:ca.SX = weight * (intrusion*100)**2
+    assert cost.shape == (1,1)
+    return cost
+
 def cost_inside_ellipses(state: ca.SX, ellipse_param: list[ca.SX], weight:Union[ca.SX, float]=1.0) -> ca.SX:
     """Cost (weighted squared) for being inside a set of ellipses defined by `(cx, cy, sx, sy, angle, alpha)`.
     
@@ -81,15 +94,21 @@ def cost_inside_ellipses(state: ca.SX, ellipse_param: list[ca.SX], weight:Union[
     assert cost.shape == (1,1)
     return cost
 
-def cost_inside_ellipses_smooth(state: ca.SX, ellipse_param: list[ca.SX], weight: float = 1.0, beta: float = 10.0) -> ca.SX:
+def cost_inside_ellipses_smooth(state: ca.SX, ellipse_param: list[ca.SX], weight:Union[ca.SX, float]=1.0, beta: float = 10.0) -> ca.SX:
     """Smooth counterpart of `cost_inside_ellipses` for gradient-based solvers.
 
-    Uses the unclamped indicator and a softplus in place of `fmax`, so the cost stays
-    differentiable where the robot crosses an obstacle boundary.
+    Same shape and `alpha` handling as `cost_inside_ellipses`, but with softplus in place
+    of `fmax`, so the cost keeps a usable gradient across the ellipse boundary. Takes the
+    state in the same orientation as `cost_inside_ellipses` -- callers pass `state.T`.
     """
-    indicator = inside_ellipses_smooth(state.T, ellipse_param)
-    smooth_max = (1/beta) * ca.log(1 + ca.exp(beta * indicator)) # smooth approx of fmax(0, x)
-    cost:ca.SX = weight * ca.sum1(smooth_max**2)
+    if len(ellipse_param) > 5:
+        alpha = ellipse_param[5]
+    else:
+        alpha = 1
+    indicator = inside_ellipses_smooth(state, ellipse_param) # indicator<0, if outside ellipse
+    indicator = weight * alpha * softplus(indicator, beta)**2
+    cost:ca.SX = ca.sum1(ca.sum2(indicator))
+    assert cost.shape == (1,1)
     return cost
 
 def cost_fleet_collision(state: ca.SX, points: ca.SX, safe_distance: float, weight:Union[ca.SX, float]=1.0) -> ca.SX:

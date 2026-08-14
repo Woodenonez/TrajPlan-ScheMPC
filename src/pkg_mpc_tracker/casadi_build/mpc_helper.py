@@ -15,6 +15,21 @@ def dist_to_points_square(point: cs.SX, points: cs.SX) -> cs.SX:
     """
     return cs.sum1((point-points)**2) # sum1 is summing each column
 
+def softplus(x: cs.SX, beta: float = 10.0) -> cs.SX:
+    """Smooth approximation of `fmax(0, x)`, in the same units as `x`.
+
+    Written in the overflow-safe form `max(x,0) + log1p(exp(-beta*|x|))/beta`, which is
+    algebraically identical to `log(1+exp(beta*x))/beta` but never evaluates `exp` of a
+    large positive number -- the naive form overflows once `beta*x` exceeds ~700, which
+    is easily reached with plant coordinates in the tens of metres.
+
+    Note `softplus(0) = log(2)/beta`, so the approximation leaves a soft tail of width
+    ~1/beta on the outside of a boundary. That tail is what gives a gradient-based solver
+    something to descend before it has actually penetrated the obstacle.
+    """
+    return cs.fmax(x, 0) + cs.log(1 + cs.exp(-beta*cs.fabs(x)))/beta
+
+
 def wrap_angle(angle: cs.SX) -> cs.SX:
     """Wrap an angle expression into [-pi, pi]."""
     return cs.atan2(cs.sin(angle), cs.cos(angle))
@@ -97,20 +112,39 @@ def inside_cvx_polygon(point: cs.SX, b: cs.SX, a0: cs.SX, a1: cs.SX) -> cs.SX:
     return is_inside
 
 def smooth_cvx_intrusion(point: cs.SX, b: cs.SX, a0: cs.SX, a1: cs.SX, beta: float = 10.0) -> cs.SX:
-    """Smooth counterpart of `inside_cvx_polygon` for gradient-based solvers.
+    """Penetration depth into a convex polygon, in metres, smooth enough for IPOPT.
 
-    Sums the squared violation of every half-space instead of multiplying clamped
-    residuals, and replaces `fmax(0, r)` with softplus so the surrogate is C-infinity.
-    Larger `beta` tracks the hinge more closely at the cost of stiffer gradients.
+    `inside_cvx_polygon` multiplies clamped residuals, so it is exactly zero -- gradient
+    included -- everywhere outside the polygon. PANOC could live with that because its
+    ALM penalty constraints did the real work, but it leaves a gradient-based solver no
+    descent direction until a predicted state is already inside an obstacle.
+
+    Here the polygon is instead summarised by the *smallest* half-space residual, which is
+    positive only when the point satisfies every half-space, i.e. only inside the polygon.
+    Residuals are divided by the normal's length first, because
+    `TrajectoryTracker.polygon_halfspace_representation` does not return unit normals --
+    without that the depth would scale with obstacle size and the weight would mean
+    something different for every obstacle.
+
+    Args:
+        point: The (n*1)-dim target point.
+        b, a0, a1: Shape (1*m) half-space parameters, as in `inside_cvx_polygon`.
+        beta: Sharpness. The soft boundary spans roughly 1/beta metres.
+
+    Returns:
+        A (1*1) non-negative depth: ~0 outside, approaching the true distance to the
+        nearest edge as the point moves inside.
     """
     eq_mtx: cs.SX = cs.vertcat(b, -a0, -a1)
     residuals: cs.SX = cs.mtimes(eq_mtx.T, cs.vertcat(1, point[0], point[1]))
+    scale: cs.SX = cs.sqrt(a0.T**2 + a1.T**2 + 1e-12) # normal lengths, (m*1)
+    residuals = residuals / scale # now a signed distance in metres
 
-    intrusion = cs.SX(0.0)
-    for i in range(residuals.shape[0]):
-        r_pos = (1.0 / beta) * cs.log(1 + cs.exp(beta * residuals[i])) # smooth approx of max(0, r)
-        intrusion += r_pos**2
-    return intrusion
+    # Smooth min over the half-spaces, shifted by the exact min so `exp` only ever sees
+    # non-positive arguments. Algebraically identical to -log(sum(exp(-beta*r)))/beta.
+    r_min = cs.mmin(residuals)
+    soft_min = r_min - cs.log(cs.sum1(cs.exp(-beta*(residuals - r_min))))/beta
+    return softplus(soft_min, beta)
 
 def outside_cvx_polygon(point: cs.SX, b: cs.SX, a0: cs.SX, a1: cs.SX) -> cs.SX:
     """Check if a point is outside a convex polygon defined by half-spaces.
