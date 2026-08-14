@@ -65,8 +65,9 @@ if __name__ == "__main__":
         ignore_speed_ref= False,
         recording= False,
         scheduler_backend= "sp_comsat", # "sp_comsat" or "occbs"
-        mpc_backend= "casadi" # "casadi" (IPOPT, no build step) or "panoc" (needs build_solver.py);
-                              # None falls back to solver_type in config/mpc_fast.yaml
+        mpc_backend= "casadi" # "casadi" (IPOPT, no build step); "panoc" or "panoc_light" (both
+                              # need build_solver.py, with panoc_builder set to match -- see
+                              # build_solver.py); None falls back to solver_type in config/mpc_fast.yaml
     )
 
 
