@@ -131,8 +131,9 @@ the cost. Consequences worth knowing:
   reference along the horizon, and `_rebranch_warm_start` re-anchors a shifted guess onto the
   current angular branch. The cost itself uses `mpc_helper.angle_error` (an `atan2` wrap) on both
   backends.
-- **Each `run_solver` call is a short penalty homotopy**, re-solving `_casadi_max_outer` times with
-  `rho` scaled by `_casadi_rho_factor` and warm-started from the previous solve.
+- **Each `run_solver` call is a short penalty homotopy**, re-solving `max_outer_iter` times with
+  `rho` starting at `rho_init` and scaled by `rho_factor` each pass, warm-started from the previous
+  solve. All three are config keys (see below).
 
 ##### Obstacle costs use smooth surrogates, not PANOC's
 
@@ -153,10 +154,12 @@ through smooth counterparts in `mpc_helper`/`mpc_cost`:
 - `cost_inside_cvx_polygon_smooth` / `cost_inside_ellipses_smooth` wrap those, keeping the
   originals' `alpha` handling and centimetre cost resolution.
 
-`CasadiNMPC._obstacle_beta` (default 10) sets sharpness: the repulsive tail outside an obstacle
-spans roughly `1/beta` metres. The soft-min under-reports depth by `log(n_edges)/beta`, so a
-point at the centre of a 1 m box measures 0.364 m rather than 0.5 m — harmless, since only the
-gradient matters, but worth knowing when reading cost values.
+`obstacle_beta` (default 10) sets sharpness: the repulsive tail outside an obstacle spans roughly
+`1/beta` metres. The soft-min under-reports depth by `log(n_edges)/beta`, so a point at the centre
+of a 1 m box measures 0.364 m rather than 0.5 m — harmless, since only the gradient matters, but
+worth knowing when reading cost values. Lowering it widens the avoidance band up to a point and
+then stops working: on a box straddling the reference, 10 gives 0.70 m of clearance and 5 gives
+1.25 m, but 2 blurs the boundary so far that the robot stalls instead of going round.
 
 Two consequences of the zero-filled parameter blocks are handled explicitly. Unused static slots
 (`Nstcobs` = 10, zero-filled) would otherwise contribute a constant `softplus(0)` term per slot —
@@ -164,10 +167,34 @@ state-independent, so harmless to the optimum, but it obscures the reported cost
 gates them out. Unused dynamic slots carry `alpha = 0` and so already contribute nothing.
 
 Still off, and separate from the above: `cost_fleet_pred`, the *predictive* fleet term. Only
-current-step fleet collision is active, and its safety distances are hard-coded (0.05/0.1 m)
-rather than taken from `robot_spec.yaml`. Note also that `run_mpc.py` calls `run_step` with
+current-step fleet collision is active. Note also that `run_mpc.py` calls `run_step` with
 `full_dyn_obstacle_list=None`, so the dynamic-obstacle cost is correct but inert in this project
 as it stands — other robots reach the MPC through the fleet term, not through `o_d`.
+
+##### Casadi-only config keys
+
+These were literals inside `casadi_impl.py`; they now live in `config/mpc_*.yaml` and are loaded
+by `MpcConfiguration` (marked `[C]` there). **PANOC ignores every one of them** — it keeps its own
+built-in constants — so changing them cannot invalidate a compiled OpEn solver, and the two
+backends are *not* automatically comparable on these settings.
+
+| Key | Default | Replaces |
+|---|---|---|
+| `qfleet` / `qfleet_pred` | 1.0 / 0.5 | `_large_weight` / `_small_weight` (PANOC uses 1000 / 10) |
+| `fleet_safe_distance` / `fleet_critical_distance` | 0.1 / 0.05 m | the two literals in `_stage_cost` |
+| `critical_step` | 100 | `_critical_step` |
+| `obstacle_beta` | 10.0 | `_obstacle_beta` |
+| `rho_init` / `rho_factor` / `max_outer_iter` | 10.0 / 5.0 / 5 | the tracker's homotopy constants |
+| `max_solver_iter` | 500 | the hard-coded `ipopt.max_iter` |
+
+`max_solver_time` is now honoured on both backends: PANOC passes it to `with_max_duration_micros`,
+CasADi converts it to `ipopt.max_cpu_time` (microseconds → seconds).
+
+The fleet distances accept `null`, which derives them from `robot_spec.yaml` exactly as PANOC does
+— `2*(vehicle_width+vehicle_margin)` and `2*vehicle_width+vehicle_margin`. **The defaults carry the
+upstream literals forward, and they are far smaller than that:** with the shipped spec the derived
+values are 1.4 m and 1.2 m against 0.1 m and 0.05 m, so as configured the fleet term barely
+engages before robots are almost touching. Set both to `null` to match PANOC.
 
 `CostMonitor` (`MONITOR_COST` in `run_mpc.py`) scores the *PANOC* cost expression, so it still
 requires OpenGEN. It is built lazily in `set_monitor`, which keeps the CasADi backend usable on

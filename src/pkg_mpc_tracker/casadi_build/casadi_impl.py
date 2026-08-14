@@ -48,18 +48,12 @@ class CasadiNMPC:
     - Obstacle terms are included as soft costs; hard constraints can be added as TODO.
     """
 
-    _large_weight = 1.0 # 1000
-    _small_weight = 0.5 # 10
-    _critical_step = 100
     _penalty_weight = 10.0 # Modelling parameter, can be changed!
 
-    # Sharpness of the softplus/soft-min used by the obstacle costs. The repulsive tail
-    # outside an obstacle spans roughly 1/beta metres, so smaller values look further
-    # ahead but blur the boundary; larger values track the true hinge but stiffen the NLP.
-    _obstacle_beta = 10.0
     # Squared-parameter mass below which a static-obstacle slot counts as unused. Slots are
     # zero-filled up to `Nstcobs`, and an all-zero polygon would otherwise contribute a
     # constant (state-independent, so harmless to the optimum, but it obscures the cost).
+    # A numerical guard rather than a tuning knob, so it stays out of the config file.
     _empty_slot_tol = 1e-9
 
     def __init__(self, mpc_config: MpcConfiguration, robot_config: CircularRobotSpecification):
@@ -69,6 +63,19 @@ class CasadiNMPC:
         self.ns = self._cfg.ns # number of states
         self.nu = self._cfg.nu # number of inputs
         self.N_hor = self._cfg.N_hor #control/pred horizon
+
+        ### Tuning knobs from config/mpc_*.yaml (these used to be literals in this file).
+        self._large_weight = self._cfg.qfleet      # current-step fleet collision weight
+        self._small_weight = self._cfg.qfleet_pred # predictive fleet collision weight
+        self._critical_step = int(self._cfg.critical_step)
+        self._obstacle_beta = float(self._cfg.obstacle_beta)
+        # `null` in the YAML means "derive from the robot spec", which is what PANOC does.
+        self._safe_distance = (2*(self._spec.vehicle_width + self._spec.vehicle_margin)
+                               if self._cfg.fleet_safe_distance is None
+                               else float(self._cfg.fleet_safe_distance))
+        self._critical_distance = (2*self._spec.vehicle_width + self._spec.vehicle_margin
+                                   if self._cfg.fleet_critical_distance is None
+                                   else float(self._cfg.fleet_critical_distance))
 
         self._motion_model: Callable[[ca.SX, ca.SX, float], ca.SX] | None = None
         self._load_parameters()
@@ -170,21 +177,20 @@ class CasadiNMPC:
 
         ### Fleet collision avoidance: J_f =  max(0,Q_f * (d_fleet - distance))**2
         ### used from mpc_cost, cost_fleet_collision.
-        safe_distance = 0.1 #2 * (self._spec.vehicle_width + self._spec.vehicle_margin)
-        critical_distance = 0.05 #2 * self._spec.vehicle_width + self._spec.vehicle_margin
         if k < self._critical_step:
             cts.cost_fleet = mc.cost_fleet_collision(
                 x_next[:2],
                 self._other_robots_current(),
-                safe_distance=critical_distance,
+                safe_distance=self._critical_distance,
                 weight=self._large_weight,
             )
 
-        # ## Fleet collision avoidance [Predictive]
+        # ## Fleet collision avoidance [Predictive] -- still disabled; weight is `qfleet_pred`
+        # ## and distance `fleet_safe_distance` in config/mpc_*.yaml when it is switched on.
         # cts.cost_fleet_pred = mc.cost_fleet_collision(
         #     x_next[:2],
         #     self._other_robots_at_step(k),
-        #     safe_distance=safe_distance,
+        #     safe_distance=self._safe_distance,
         #     weight=self._small_weight,
         # )
         ### J_O dynamic/static obstacle costs, mirroring the PANOC implementation but
@@ -418,7 +424,13 @@ class CasadiNMPC:
         nlp = {"x": w, "p": self._p, "f": total_cost, "g": g_expr}
 
         if solver_options is None:
-            solver_options = {"ipopt.print_level": 0, "print_time": 0, "ipopt.max_iter":500} 
+            # `max_solver_time` is in microseconds (PANOC's unit); ipopt.max_cpu_time is in seconds.
+            solver_options = {
+                "ipopt.print_level": 0,
+                "print_time": 0,
+                "ipopt.max_iter": int(self._cfg.max_solver_iter),
+                "ipopt.max_cpu_time": float(self._cfg.max_solver_time) / 1e6,
+            }
         solver = ca.nlpsol("nmpc_solver", solver_type, nlp, solver_options)
 
         return CasadiProblem(

@@ -113,6 +113,19 @@ class MpcConfiguration(_Configuration):
         self.qtheta = config.qtheta                     # Cost for heading  deviation each time step to the reference
         self.qstcobs = config.qstcobs                   # Cost for static obstacle avoidance
         self.qdynobs = config.qdynobs                   # Cost for dynamic obstacle avoidance
-        self.qpN = config.qpN                           # Terminal cost; error relative to final reference position       
+        self.qpN = config.qpN                           # Terminal cost; error relative to final reference position
         self.qthetaN = config.qthetaN                   # Terminal cost; error relative to final reference heading
+
+        # [C] Casadi-only knobs. These were hard-coded literals in casadi_impl.py; PANOC keeps
+        # its own built-in values and ignores all of them.
+        self.qfleet = config.qfleet                     # [C] Cost for collision with other robots, current step
+        self.qfleet_pred = config.qfleet_pred           # [C] Cost for collision with other robots, over the horizon
+        self.fleet_safe_distance = config.fleet_safe_distance          # [C] meters, or None to derive from robot spec
+        self.fleet_critical_distance = config.fleet_critical_distance  # [C] meters, or None to derive from robot spec
+        self.critical_step = config.critical_step       # [C] Horizon step past which current-step fleet/dyn terms stop
+        self.obstacle_beta = config.obstacle_beta       # [C] Sharpness of the smooth obstacle costs
+        self.rho_init = config.rho_init                 # [C] Penalty homotopy, initial weight
+        self.rho_factor = config.rho_factor             # [C] Penalty homotopy, weight multiplier per outer iteration
+        self.max_outer_iter = config.max_outer_iter     # [C] Penalty homotopy, outer solves per control step
+        self.max_solver_iter = config.max_solver_iter   # [C] ipopt.max_iter
 
