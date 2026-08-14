@@ -10,7 +10,7 @@ data_path = os.path.join(project_root, "data")
 
 
 def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False,
-                  scheduler_backend="sp_comsat"):
+                  scheduler_backend="sp_comsat", mpc_backend=None):
     if scheduler:
         if scheduler_backend == "sp_comsat":
             from pkg_sche.sp_comsat.Compo_slim import Compo_slim
@@ -49,7 +49,8 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         with open(f"{data_path}/test_cases/{problem}.json",'r') as read_file:
             data = json.load(read_file)
             EnvFolder = data['test_data']['Environment']
-        run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref, recording=recording)
+        run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref,
+                recording=recording, mpc_backend=mpc_backend)
 
 if __name__ == "__main__":
     # problem = '4Small' # SAFETY COEFF 20
@@ -60,10 +61,12 @@ if __name__ == "__main__":
         problem,
         scheduler = False,
         controller= True,
-        naive_tracker= False, # True = proportional baseline, False = NMPC (solver_type in config/mpc_fast.yaml)
+        naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
-        scheduler_backend= "occbs" # "sp_comsat" or "occbs"
+        scheduler_backend= "occbs", # "sp_comsat" or "occbs"
+        mpc_backend= "casadi" # "casadi" (IPOPT, no build step) or "panoc" (needs build_solver.py);
+                              # None falls back to solver_type in config/mpc_fast.yaml
     )
 
 
