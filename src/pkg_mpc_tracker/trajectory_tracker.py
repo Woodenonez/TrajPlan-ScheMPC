@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # System import
 import os
 import sys
@@ -5,21 +7,28 @@ import math
 import warnings
 import itertools
 from timeit import default_timer as timer
-from typing import Callable, Optional, TypedDict
+from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, TypedDict
 # External import
 import numpy as np
 from scipy.spatial import ConvexHull # type: ignore
-# Custom import 
+# Custom import
 from configs import MpcConfiguration, CircularRobotSpecification
-from .cost_monitor import CostMonitor, MonitoredCost
+from .casadi_build.casadi_impl import CasadiNMPC
+
+# `CostMonitor` pulls in OpenGEN transitively, so it is imported lazily (see `set_monitor`)
+# to keep the CasADi backend usable on installations without OpenGEN.
+if TYPE_CHECKING:
+    from .cost_monitor import CostMonitor, MonitoredCost
+else:
+    CostMonitor = Any
+    MonitoredCost = dict
 
 
 PathNode = tuple[float, float]
 
 
-class Solver(): # this is not found in the .so file (in ternimal: nm -D  navi_test.so)
-    import opengen as og # type: ignore
-    def run(self, p: list, initial_guess=None, initial_lagrange_multipliers=None, initial_penalty=None) -> og.opengen.tcp.solver_status.SolverStatus: pass
+class Solver(Protocol): # this is not found in the .so file (in ternimal: nm -D  navi_test.so)
+    def run(self, p: list, initial_guess=None, initial_lagrange_multipliers=None, initial_penalty=None) -> Any: ...
 
 
 class DebugInfo(TypedDict):
@@ -56,10 +65,16 @@ class TrajectoryTracker:
         The solver needs to be built before running the trajectory tracking. \n
         To run the tracker: 
             1. Load motion model and init states; 
-            2. Set reference path and trajectory; 
+            2. Set reference path and trajectory;
             3. Run step.
     """
-    
+
+    # Penalty homotopy for the CasADi/IPOPT backend: each outer iteration re-solves with
+    # `rho` scaled by `_casadi_rho_factor`, warm-started from the previous solution.
+    _casadi_rho_init = 10.0
+    _casadi_rho_factor = 5.0
+    _casadi_max_outer = 5
+
     def __init__(self, config: MpcConfiguration, robot_specification: CircularRobotSpecification, robot_id:Optional[int]=None, use_tcp:bool=False, verbose=False):
         """Initialize the trajectory tracker.
 
@@ -82,19 +97,27 @@ class TrajectoryTracker:
         self.nu = self.config.nu
         self.N_hor = self.config.N_hor
         self.solver_type = self.config.solver_type
+        self.use_tcp = use_tcp
 
         # Initialization
         self._idle = True
         self._mode: str = 'none'
         self._map_loaded = False
         self._init_guess = [0.0]*self.nu*self.N_hor
+        # Measured heading arrives wrapped to [-pi, pi]; the MPC needs it continuous.
+        self._last_measured_theta_wrapped: Optional[float] = None
+        self._last_measured_theta_continuous: Optional[float] = None
         self._obstacle_weights()
         self.set_work_mode(mode='safe', use_predefined_speed=True)
 
-        # Monitor
+        # Monitor. Built on demand in `set_monitor` -- it needs OpenGEN, which the
+        # CasADi backend otherwise does without.
         self.monitor_on = False
-        self.cost_monitor = CostMonitor(self.config, self.robot_spec, verbose)
-        self.cost_monitor.init_params()
+        self.cost_monitor: Optional[CostMonitor] = None
+
+        # CasADi backend state, populated by `load_motion_model`.
+        self._casadi_nmpc: Optional[CasadiNMPC] = None
+        self._casadi_problem = None
 
         if self.config.solver_type == 'PANOC':
             self.__import_solver(use_tcp=use_tcp)
@@ -196,7 +219,16 @@ class TrajectoryTracker:
             Model: The motion model should be the same as the builder's motion model.
         """
         self.motion_model = motion_model
-        self.cost_monitor.load_motion_model(motion_model)
+        if self.cost_monitor is not None:
+            self.cost_monitor.load_motion_model(motion_model)
+
+        if self.solver_type == 'Casadi':
+            # Unlike PANOC (compiled ahead of time by `build_solver.py`), the CasADi NLP
+            # is constructed here, once per robot, and solved by IPOPT at run time.
+            self._casadi_nmpc = CasadiNMPC(self.config, self.robot_spec)
+            self._casadi_nmpc.load_motion_model(motion_model)
+            self._casadi_problem = self._casadi_nmpc.build()
+            self._init_guess = [0.0] * len(self._casadi_problem.lbw)
 
     def load_init_states(self, current_state: np.ndarray, goal_state: np.ndarray):
         """Load the initial state and goal state.
@@ -223,10 +255,13 @@ class TrajectoryTracker:
 
         if (not isinstance(current_state, np.ndarray)) or (not isinstance(goal_state, np.ndarray)):
             raise TypeError(f'State should be numpy.ndarry, got {type(current_state)}/{type(goal_state)}.')
-        self.state = current_state
-        self.final_goal = goal_state
+        state_continuous = np.array(current_state, dtype=float, copy=True)
+        self.state = state_continuous
+        self.final_goal = np.array(goal_state, dtype=float, copy=True)
+        self._last_measured_theta_wrapped = self.wrap_to_pi(float(current_state[2]))
+        self._last_measured_theta_continuous = float(state_continuous[2])
 
-        self.past_states: list[np.ndarray] = [current_state]
+        self.past_states: list[np.ndarray] = [state_continuous.copy()]
         self.past_actions: list[np.ndarray] = []
         self.cost_timelist: list[float] = []
         self.solver_time_timelist: list[float] = []
@@ -282,6 +317,21 @@ class TrajectoryTracker:
             monitor_on: If the monitor is on. Defaults to True.
         """
         self.monitor_on = monitor_on
+        if not monitor_on:
+            return
+
+        if self.cost_monitor is None:
+            try:
+                from .cost_monitor import CostMonitor as RuntimeCostMonitor
+                self.cost_monitor = RuntimeCostMonitor(self.config, self.robot_spec, self.vb)
+            except (ModuleNotFoundError, RuntimeError) as exc:
+                self.monitor_on = False
+                raise RuntimeError(
+                    "Cost monitoring scores the PANOC cost expression and needs OpenGEN, which is not installed."
+                ) from exc
+
+        if hasattr(self, 'motion_model'):
+            self.cost_monitor.load_motion_model(self.motion_model)
 
     def set_current_state(self, current_state: np.ndarray):
         """To synchronize the current state of the robot with the trajectory tracker.
@@ -294,7 +344,20 @@ class TrajectoryTracker:
         """
         if not isinstance(current_state, np.ndarray):
             raise TypeError(f'State should be numpy.ndarry, got {type(current_state)}.')
-        self.state = current_state
+        # Accumulate heading rather than taking the wrapped measurement directly, so a
+        # robot turning through +-pi does not hand the solver a 2*pi jump in its state.
+        state_continuous = np.array(current_state, dtype=float, copy=True)
+        measured_theta_wrapped = self.wrap_to_pi(float(state_continuous[2]))
+        if self._last_measured_theta_wrapped is None or self._last_measured_theta_continuous is None:
+            measured_theta_continuous = measured_theta_wrapped
+        else:
+            delta_theta = self.wrap_to_pi(measured_theta_wrapped - self._last_measured_theta_wrapped)
+            measured_theta_continuous = self._last_measured_theta_continuous + delta_theta
+
+        state_continuous[2] = measured_theta_continuous
+        self._last_measured_theta_wrapped = measured_theta_wrapped
+        self._last_measured_theta_continuous = measured_theta_continuous
+        self.state = state_continuous
 
     def set_ref_states(self, ref_states: np.ndarray, ref_speed:Optional[float]=None):
         """Set the local reference states for the coming time step.
@@ -404,7 +467,7 @@ class TrajectoryTracker:
             other_robot_states = [-10] * (self.ns*(self.N_hor+1)*self.config.Nother)
 
         ### Get reference states ###
-        ref_states = self.ref_states.copy()
+        ref_states = self._unwrap_reference_states(self.ref_states.copy())
         finish_state = ref_states[-1,:]
         current_refs = ref_states.reshape(-1).tolist()
 
@@ -424,8 +487,8 @@ class TrajectoryTracker:
         current_ref_theta = math.degrees(ref_states[0, 2]) % 360
         current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
         current_theta = math.degrees(self.state[2]) % 360
-        theta_diff = self.angle_diff(current_ref_theta, current_theta)
-        theta_diff_last = self.angle_diff(current_ref_theta_last, current_theta)
+        theta_diff = float(self.angle_diff(current_ref_theta, current_theta))
+        theta_diff_last = float(self.angle_diff(current_ref_theta_last, current_theta))
         # if (theta_diff := (abs(current_ref_theta - current_theta) % 180)) > 120:
         #     self.set_work_mode(mode='aligning')
         # elif theta_diff > 60:
@@ -439,7 +502,7 @@ class TrajectoryTracker:
 
         ### Check if turning around ###
         mid_idx = 0
-        ref_theta_diff = self.angle_diff(current_ref_theta, current_ref_theta_last)
+        ref_theta_diff = float(self.angle_diff(current_ref_theta, current_ref_theta_last))
         if (ref_theta_diff > 170):
             all_ref_thetas = np.degrees(ref_states[:, 2]) % 360
             all_theta_diffs = self.angle_diff(all_ref_thetas, current_theta)
@@ -471,7 +534,7 @@ class TrajectoryTracker:
             raise RuntimeError(f"[{self.__class__.__name__}-{self.robot_id}] Cannot run solver.")
         
         monitored_costs = None
-        if self.monitor_on:
+        if self.monitor_on and self.cost_monitor is not None:
             monitored_costs = self.cost_monitor.get_cost(self.state, params, u, report=report_cost)
 
         assert isinstance(cost, float)
@@ -523,10 +586,58 @@ class TrajectoryTracker:
             solver_time:float   = solution.solve_time_ms
 
         elif self.solver_type == 'Casadi':
-            raise NotImplementedError
-            # cas_solver = CasadiSolver(self.config, self.robot_spec, parameters, self.next_initial_guess)
-            # u, cost, exit_status, solver_time, next_initial_guess = cas_solver.run()
-            # self.next_initial_guess = next_initial_guess
+            if self._casadi_problem is None:
+                raise RuntimeError(f"[{self.__class__.__name__}-{self.robot_id}] Casadi solver is not built. Call load_motion_model(...) first.")
+
+            # Direct multiple shooting carries the states in the decision vector, so an
+            # all-zero guess starts the trajectory at the origin rather than at the robot.
+            # Seed X with the current state repeated over the horizon instead.
+            if (initial_guess is None
+                    or len(initial_guess) != len(self._casadi_problem.lbw)
+                    or all(v == 0.0 for v in initial_guess)):
+                x_init = list(np.tile(state, self.N_hor + 1))
+                u_init = [0.0] * (self.nu * self.N_hor)
+                initial_guess = x_init + u_init
+
+            initial_guess = self._rebranch_warm_start(initial_guess, state)
+
+            # Penalty homotopy: re-solve with a stiffening penalty weight so IPOPT is not
+            # handed a badly conditioned problem on the first iterate.
+            rho = self._casadi_rho_init
+            w0 = initial_guess
+            t0 = timer()
+            sol = None
+            for _ in range(self._casadi_max_outer):
+                sol = self._casadi_problem.solver(
+                    x0=w0,
+                    p=parameters + [rho],
+                    lbx=self._casadi_problem.lbw,
+                    ubx=self._casadi_problem.ubw,
+                    lbg=self._casadi_problem.lbg,
+                    ubg=self._casadi_problem.ubg,
+                )
+                w0 = np.array(sol['x']).reshape(-1).tolist()
+                rho *= self._casadi_rho_factor
+
+            solver_time = (timer() - t0) * 1000.0
+            w_opt = w0
+
+            stats = self._casadi_problem.solver.stats()
+            exit_status = str(stats.get('return_status', 'UNKNOWN'))
+            cost = float(sol['f']) # type: ignore[index]
+
+            x_size = self.ns * (self.N_hor + 1)
+            u_size = self.nu * self.N_hor
+            u = w_opt[x_size : x_size + u_size]
+
+            if self.vb:
+                max_abs_state = max((abs(v) for v in w_opt[:x_size]), default=0.0)
+                max_abs_input = max((abs(v) for v in w_opt[x_size:x_size + u_size]), default=0.0)
+                print(f"[CasadiDebug-{self.robot_id}] status={exit_status}, iter={stats.get('iter_count', 'NA')}, "
+                      f"max|X|={max_abs_state:.4g}, max|U|={max_abs_input:.4g}, rho={rho:.4g}, cost={cost:.4g}")
+
+            # Warm start the next step from the shifted solution.
+            self._init_guess = CasadiNMPC.shift_warm_start(w_opt, ns=self.ns, nu=self.nu, N=self.N_hor)
 
         else:
             raise ModuleNotFoundError(f'There is no solver with type {self.solver_type}.')
@@ -579,7 +690,7 @@ class TrajectoryTracker:
     def report_cost(self, real_cost: float, step_runtime: float, monitored_cost: MonitoredCost, object_id:Optional[str]=None, report_steps:bool=False):
         def colored_print(r, g, b, text, end='\n'):
             print(f"\033[38;2;{r};{g};{b}m{text} \033[38;2;255;255;255m", end=end) 
-        if self.monitor_on:
+        if self.monitor_on and self.cost_monitor is not None:
             self.cost_monitor.report_cost(monitored_cost, object_id=object_id, report_steps=report_steps)
         if self.solver_time_timelist:
             solver_time = round(self.solver_time_timelist[-1], 3)
@@ -594,9 +705,61 @@ class TrajectoryTracker:
         
     @staticmethod
     def angle_diff(a, b):
-        diff = np.array(abs(a - b)) 
-        diff[diff > 180] = 360 - diff[diff > 180] # if the angle difference is larger than 180, use the other direction
+        # Accepts scalars as well as arrays; boolean-mask assignment would fail on a 0-d array.
+        diff = np.abs(np.asarray(a, dtype=float) - np.asarray(b, dtype=float))
+        diff = np.where(diff > 180.0, 360.0 - diff, diff) # if the angle difference is larger than 180, use the other direction
+        if diff.ndim == 0:
+            return float(diff)
         return diff
+
+    @staticmethod
+    def wrap_to_pi(angle):
+        """Wrap an angle (or array of angles) in radians into [-pi, pi)."""
+        wrapped = (np.asarray(angle, dtype=float) + np.pi) % (2.0 * np.pi) - np.pi
+        if np.ndim(wrapped) == 0:
+            return float(wrapped)
+        return wrapped
+
+    def _unwrap_reference_states(self, ref_states: np.ndarray) -> np.ndarray:
+        """Make the reference heading continuous and anchored to the current heading.
+
+        The planner emits headings wrapped to [-pi, pi], so a reference crossing +-pi
+        looks like a full turn to the solver. Unwrap along the horizon, starting from
+        the branch nearest the robot's own heading.
+        """
+        if ref_states.shape[0] == 0:
+            return ref_states
+
+        ref_states = np.array(ref_states, dtype=float, copy=True)
+        ref_states[0, 2] = self.state[2] + self.wrap_to_pi(ref_states[0, 2] - self.state[2])
+        for idx in range(1, ref_states.shape[0]):
+            ref_states[idx, 2] = ref_states[idx-1, 2] + self.wrap_to_pi(ref_states[idx, 2] - ref_states[idx-1, 2])
+        return ref_states
+
+    def _rebranch_warm_start(self, initial_guess: list[float], state: np.ndarray) -> list[float]:
+        """Re-anchor a shifted warm start onto the current state's angular branch.
+
+        The previous solution's headings may sit a multiple of 2*pi away from the state
+        the solver is now initialized at, which shows up as a large spurious heading
+        error. Pin X_0 to the measured state and unwrap the rest of the horizon from it.
+        """
+        if self._casadi_problem is None or len(initial_guess) != len(self._casadi_problem.lbw):
+            return initial_guess
+
+        rebranched = list(initial_guess)
+        x_size = self.ns * (self.N_hor + 1)
+        if x_size == 0:
+            return rebranched
+
+        rebranched[:self.ns] = list(np.asarray(state, dtype=float))
+        theta_anchor = float(state[2])
+        for step in range(self.N_hor + 1):
+            theta_idx = step*self.ns + 2
+            if theta_idx >= x_size:
+                break
+            rebranched[theta_idx] = theta_anchor + self.wrap_to_pi(rebranched[theta_idx] - theta_anchor)
+            theta_anchor = rebranched[theta_idx]
+        return rebranched
 
     @staticmethod
     def lineseg_dists(points: np.ndarray, line_points_1: np.ndarray, line_points_2: np.ndarray) -> np.ndarray:
@@ -677,7 +840,7 @@ class TrajectoryTracker:
         current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
         current_theta = math.degrees(self.state[2]) % 360
         mid_idx = 3
-        ref_theta_diff = self.angle_diff(current_ref_theta, current_ref_theta_last)
+        ref_theta_diff = float(self.angle_diff(current_ref_theta, current_ref_theta_last))
         if (ref_theta_diff > 170):
             all_ref_thetas = np.degrees(ref_states[:, 2]) % 360
             all_theta_diffs = self.angle_diff(all_ref_thetas, current_theta)

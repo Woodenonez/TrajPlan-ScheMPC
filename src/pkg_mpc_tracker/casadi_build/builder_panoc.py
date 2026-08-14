@@ -143,11 +143,15 @@ class PanocBuilder:
         state = self._motion_model(last_state, action, self.ts)
         pts = penalty_terms
         cts = mc.CostTerms()
+        theta_err = mh.angle_error(state[2], ref_states[2, 0])
 
         ### Reference deviation costs
+        cts.cost_pos = pts['pos'] * (
+            (state[0] - ref_states[0, 0])**2 + (state[1] - ref_states[1, 0])**2
+        )
         cts.cost_rpd = mc.cost_refpath_deviation(state, ref_states[:2, :], weight=pts['rpd'])
         cts.cost_rvd = pts['vel'] * (action[0]-ref_speed)**2
-        cts.cost_rtd = pts['theta'] * (state[2]-ref_states[2, 0])**2
+        cts.cost_rtd = pts['theta'] * theta_err**2
         cts.cost_input = ca.sum1(ca.vertcat(pts['v'], pts['w']) * action**2) 
 
         ### Fleet collision avoidance
@@ -254,7 +258,8 @@ class PanocBuilder:
             penalty_constraints += sum(penalty_const_list)
 
         ### Terminal cost
-        cost += self._q_terms['posN']*((state[0]-self._s_N[0])**2 + (state[1]-self._s_N[1])**2) + self._q_terms['thetaN']*(state[2]-self._s_N[2])**2 # terminated cost
+        theta_terminal_err = mh.angle_error(state[2], self._s_N[2])
+        cost += self._q_terms['posN']*((state[0]-self._s_N[0])**2 + (state[1]-self._s_N[1])**2) + self._q_terms['thetaN']*theta_terminal_err**2 # terminated cost
 
         ### Max speed bound
         umin = [self._spec.lin_vel_min, -self._spec.ang_vel_max] * self.N_hor
