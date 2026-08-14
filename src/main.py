@@ -53,18 +53,18 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
                 recording=recording, mpc_backend=mpc_backend)
 
 if __name__ == "__main__":
-    # problem = '4Small' # SAFETY COEFF 20
-    problem = '4SmallNu' # 4Small's graph, one destination per robot (single-goal MAPF)
+    problem = '4Small' # SAFETY COEFF 20
+    # problem = '4SmallNu' # 4Small's graph, one destination per robot (single-goal MAPF)
     # problem = "10Large"
 
     general_funct(
         problem,
-        scheduler = False,
+        scheduler = True,
         controller= True,
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
-        scheduler_backend= "occbs", # "sp_comsat" or "occbs"
+        scheduler_backend= "sp_comsat", # "sp_comsat" or "occbs"
         mpc_backend= "casadi" # "casadi" (IPOPT, no build step) or "panoc" (needs build_solver.py);
                               # None falls back to solver_type in config/mpc_fast.yaml
     )
