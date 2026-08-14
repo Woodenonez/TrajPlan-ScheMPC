@@ -37,6 +37,7 @@ Everything is toggled by editing literals in `src/main.py`'s `__main__` block �
 - `ignore_speed_ref` — drop the schedule's speed reference and track geometry only.
 - `recording` — save an mp4 into `Demo/`.
 - `scheduler_backend` — `"sp_comsat"` (default) or `"occbs"`; see "Second scheduler backend" below.
+- `mpc_backend` — `"casadi"` or `"panoc"`, selecting the NMPC solver; `None` falls back to `solver_type` in the YAML. Ignored when `naive_tracker` is `True`. See "Two NMPC backends" below.
 
 Simulation knobs that are *not* exposed through `main.py` live as module-level constants at the top of `run_mpc.py` (`CFG_FNAME`, `AUTORUN`, `MONITOR_COST`, `TIMEOUT`, `VERBOSE`).
 
@@ -99,16 +100,24 @@ The tracker is a small state machine (`work_mode` / `_mode`: `aligning`, `safe`,
 
 Configuration is YAML in `config/`, loaded through the dataclass-ish loaders in `src/configs.py`: `mpc_fast.yaml` / `mpc_default.yaml` (`MpcConfiguration`) and `robot_spec.yaml` (`CircularRobotSpecification`). Both `build_solver.py` and `run_mpc.py` name their config file independently — **keep them pointing at the same file**, or the compiled solver will not match the runtime problem dimensions.
 
-#### Two NMPC backends — `solver_type` in `config/mpc_*.yaml`
+#### Two NMPC backends — the `mpc_backend` flag, or `solver_type` in `config/mpc_*.yaml`
 
 The tracker can drive either of two solvers over the *same* parameter vector; the block
 layout in `casadi_impl.py` deliberately mirrors `builder_panoc.py` field for field, so a
 parameter packed for one backend is valid for the other.
 
-| `solver_type` | Module | Solver | Build step |
+| `mpc_backend` / `solver_type` | Module | Solver | Build step |
 |---|---|---|---|
-| `'Casadi'` (default) | `casadi_build/casadi_impl.py` | IPOPT via `ca.nlpsol`, direct multiple shooting | none — the NLP is constructed per robot in `load_motion_model` |
-| `'PANOC'` | `casadi_build/builder_panoc.py` | PANOC/OpEn, compiled Rust | `python src/build_solver.py` |
+| `"casadi"` / `'Casadi'` (default) | `casadi_build/casadi_impl.py` | IPOPT via `ca.nlpsol`, direct multiple shooting | none — the NLP is constructed per robot in `load_motion_model` |
+| `"panoc"` / `'PANOC'` | `casadi_build/builder_panoc.py` | PANOC/OpEn, compiled Rust | `python src/build_solver.py` |
+
+Pick one per run with `general_funct(..., mpc_backend="panoc")`; `run_mpc.resolve_mpc_backend`
+overwrites `config_mpc.solver_type` in place and prints the resolved choice. Passing `None`
+keeps whatever the YAML says, so the config file remains the default and the flag is the
+override. Selecting `"panoc"` without having run `build_solver.py` fails immediately with a
+message naming the missing path, rather than as an `ImportError` deep inside the tracker.
+Note `build_solver.py` always builds PANOC regardless of `solver_type`, so leaving the YAML on
+`'Casadi'` does not stop you rebuilding the PANOC solver.
 
 The CasADi backend puts the states in the decision vector (`w = [X, U]`, dynamics enforced as
 equality constraints `g`), whereas PANOC keeps only the inputs and rolls the dynamics out inside
