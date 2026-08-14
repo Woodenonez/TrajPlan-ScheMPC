@@ -181,7 +181,7 @@ def schedule(the_instance, current_routes):
     # HERE I BUILD UP THE MODEL FOR THE SCHEDULING PROBLEM
     set_option(rational_to_decimal=True)
     set_option(precision=2)
-    if False:
+    if True:
         scheduling = Optimize()
 
         scheduling.minimize(
