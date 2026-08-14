@@ -32,9 +32,28 @@ qdynobs: 10.0          # Cost for dynamic obstacle avoidance
 # Terminal weights
 qpN: 0.0                # Terminal cost; error relative to final reference position         
 qthetaN: 0.0            # Terminal cost; error relative to final reference heading     
+# Fleet (robot-to-robot) collision avoidance
+# NOTE: these four were hard-coded in casadi_impl.py and apply to the Casadi backend only.
+#       PANOC keeps its own built-in values (weights 1000/10, distances derived from
+#       robot_spec.yaml) and ignores this block.
+qfleet: 1.0             # Cost weight for collision with other robots at the current step
+qfleet_pred: 0.5        # Cost weight for collision with other robots over the horizon
+# Distances in meters. Set to `null` to derive them from robot_spec.yaml the way PANOC does,
+# i.e. 2*(vehicle_width+vehicle_margin) and 2*vehicle_width+vehicle_margin. With the shipped
+# spec that is 1.4 / 1.2 m, more than ten times the literals below, which came from upstream.
+fleet_safe_distance: 0.1        # Used by the predictive fleet term
+fleet_critical_distance: 0.05   # Used by the current-step fleet term
+critical_step: 100      # Horizon step past which current-step fleet/dynamic terms switch off
+# Casadi obstacle cost shaping
+obstacle_beta: 10.0     # Sharpness of the smooth obstacle costs; repulsive tail spans ~1/beta meters
+# Casadi penalty homotopy (each run_solver call re-solves max_outer_iter times)
+rho_init: 10.0          # Initial penalty weight
+rho_factor: 5.0         # Penalty weight multiplier per outer iteration
+max_outer_iter: 5       # Number of outer solves per control step
 # Building options in the optimizer
 solver_type: 'Casadi'   # 'Casadi' (IPOPT, built at run time) or 'PANOC' (OpEn, needs build_solver.py)
-max_solver_time: 500_000        # micros (0.5 sec)
+max_solver_time: 500_000        # micros (0.5 sec). Casadi maps this to ipopt.max_cpu_time
+max_solver_iter: 500            # Casadi only: ipopt.max_iter
 build_type: 'release'           # Can have 'debug' or 'release'
 build_directory: 'mpc_solver'   # Name of the directory where the build is created
 bad_exit_codes: ["NotConvergedIterations", "NotConvergedOutOfTime"] # Optimizer specific names, otherwise "Converged"

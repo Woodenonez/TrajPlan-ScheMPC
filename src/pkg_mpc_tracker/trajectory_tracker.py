@@ -69,12 +69,6 @@ class TrajectoryTracker:
             3. Run step.
     """
 
-    # Penalty homotopy for the CasADi/IPOPT backend: each outer iteration re-solves with
-    # `rho` scaled by `_casadi_rho_factor`, warm-started from the previous solution.
-    _casadi_rho_init = 10.0
-    _casadi_rho_factor = 5.0
-    _casadi_max_outer = 5
-
     def __init__(self, config: MpcConfiguration, robot_specification: CircularRobotSpecification, robot_id:Optional[int]=None, use_tcp:bool=False, verbose=False):
         """Initialize the trajectory tracker.
 
@@ -98,6 +92,12 @@ class TrajectoryTracker:
         self.N_hor = self.config.N_hor
         self.solver_type = self.config.solver_type
         self.use_tcp = use_tcp
+
+        # Penalty homotopy for the CasADi/IPOPT backend: each outer iteration re-solves with
+        # `rho` scaled by `_casadi_rho_factor`, warm-started from the previous solution.
+        self._casadi_rho_init = float(self.config.rho_init)
+        self._casadi_rho_factor = float(self.config.rho_factor)
+        self._casadi_max_outer = int(self.config.max_outer_iter)
 
         # Initialization
         self._idle = True
