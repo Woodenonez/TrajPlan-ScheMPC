@@ -53,6 +53,15 @@ class CasadiNMPC:
     _critical_step = 100
     _penalty_weight = 10.0 # Modelling parameter, can be changed!
 
+    # Sharpness of the softplus/soft-min used by the obstacle costs. The repulsive tail
+    # outside an obstacle spans roughly 1/beta metres, so smaller values look further
+    # ahead but blur the boundary; larger values track the true hinge but stiffen the NLP.
+    _obstacle_beta = 10.0
+    # Squared-parameter mass below which a static-obstacle slot counts as unused. Slots are
+    # zero-filled up to `Nstcobs`, and an all-zero polygon would otherwise contribute a
+    # constant (state-independent, so harmless to the optimum, but it obscures the cost).
+    _empty_slot_tol = 1e-9
+
     def __init__(self, mpc_config: MpcConfiguration, robot_config: CircularRobotSpecification):
         self._cfg = mpc_config
         self._spec = robot_config
@@ -178,15 +187,24 @@ class CasadiNMPC:
         #     safe_distance=safe_distance,
         #     weight=self._small_weight,
         # )
-        ### J_O dynamic/static obstacle costs, similar to PANOC implementation.
-        #cts.cost_dynobs = self._dynamic_obstacle_current_cost(k, x_next)
-        #cts.cost_stcobs = self._static_obstacle_cost(x_next, self._q_stc[k])
-        #cts.cost_dynobs_pred = self._dynamic_obstacle_cost(k, x_next, self._q_dyn[k])
-        # penalty_constraints_stcobs = self._penalty_weight * self._static_obstacle_intrusion(x_next)
-        # penalty_constraints_dynobs = self._penalty_weight * self._dynamic_obstacle_intrusion(k, x_next)
-        return cts.sum() # + penalty_constraints_stcobs + penalty_constraints_dynobs
+        ### J_O dynamic/static obstacle costs, mirroring the PANOC implementation but
+        ### routed through the smooth variants so IPOPT gets a usable gradient.
+        cts.cost_stcobs = self._static_obstacle_cost(x_next, self._q_stc[k])
+        cts.cost_dynobs = self._dynamic_obstacle_current_cost(k, x_next)
+        cts.cost_dynobs_pred = self._dynamic_obstacle_cost(k, x_next, self._q_dyn[k])
+        return cts.sum()
 
     def _static_obstacle_cost(self, state: ca.SX, weight: ca.SX) -> ca.SX:
+        """Penalty for penetrating any of the static (map) obstacles.
+
+        Uses the smooth polygon cost rather than PANOC's product-of-clamped-residuals
+        form, which has no gradient outside the obstacle and so would leave IPOPT blind
+        until a predicted state was already inside a wall.
+
+        Unused obstacle slots are all-zero, which makes every half-space residual zero
+        and the depth `softplus(0) = log(2)/beta`. That constant is subtracted off so
+        empty slots contribute exactly nothing.
+        """
         cost = ca.SX(0.0)
         for i in range(self._cfg.Nstcobs):
             eq_param = self._o_s[i * self._cfg.nstcobs : (i + 1) * self._cfg.nstcobs]
@@ -194,8 +212,11 @@ class CasadiNMPC:
             b = eq_param[:n_edges]
             a0 = eq_param[n_edges : 2 * n_edges]
             a1 = eq_param[2 * n_edges :]
-            # cost += mc.cost_inside_cvx_polygon(state, b.T, a0.T, a1.T, weight=weight)
-            cost += mc.cost_inside_cvx_polygon(state, b.T, a0.T, a1.T, weight=weight)
+            # An unused slot is all zeros; `is_used` is 0 for those and 1 otherwise.
+            is_used = ca.fmin(1.0, ca.sum1(b**2 + a0**2 + a1**2) / self._empty_slot_tol)
+            cost += is_used * mc.cost_inside_cvx_polygon_smooth(
+                state, b.T, a0.T, a1.T, weight=weight, beta=self._obstacle_beta
+            )
         return cost
 
     def _dynamic_obstacle_cost(self, k: int, state: ca.SX, weight: ca.SX) -> ca.SX:
@@ -215,8 +236,8 @@ class CasadiNMPC:
             ang_dyn,
             alpha_dyn,
         ]
-        cost += mc.cost_inside_ellipses(state.T, ellipse_param, weight=weight) 
-        return cost #mc.cost_inside_ellipses_smooth(state.T, ellipse_param, weight=weight) # mc.cost_inside_ellipses(state.T, ellipse_param, weight=weight)
+        cost += mc.cost_inside_ellipses_smooth(state.T, ellipse_param, weight=weight, beta=self._obstacle_beta)
+        return cost
 
     def _dynamic_obstacle_current_cost(self, k: int, state: ca.SX) -> ca.SX:
         cost = ca.SX(0.0)
@@ -236,8 +257,8 @@ class CasadiNMPC:
             ang_dyn,
             alpha_dyn,
         ]
-        cost += mc.cost_inside_ellipses(state.T, ellipse_param, weight=self._large_weight) 
-        return cost # mc.cost_inside_ellipses_smooth(state.T, ellipse_param, weight=self._large_weight)  #mc.cost_inside_ellipses(state.T, ellipse_param, weight=self._large_weight)
+        cost += mc.cost_inside_ellipses_smooth(state.T, ellipse_param, weight=self._large_weight, beta=self._obstacle_beta)
+        return cost
 
     def _static_obstacle_intrusion(self, state: ca.SX) -> ca.SX:
         inside_stc: list[ca.SX] = []

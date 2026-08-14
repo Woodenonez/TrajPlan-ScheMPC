@@ -125,14 +125,40 @@ the cost. Consequences worth knowing:
 - **Each `run_solver` call is a short penalty homotopy**, re-solving `_casadi_max_outer` times with
   `rho` scaled by `_casadi_rho_factor` and warm-started from the previous solve.
 
-**The CasADi backend currently ignores obstacles.** Only reference tracking, input/acceleration
-penalties, and *current-step* fleet collision are active in `CasadiNMPC._stage_cost`; the static
-and dynamic obstacle costs and the penalty-constraint terms are present but commented out, and
-the fleet safety distances are hard-coded (0.05/0.1 m) rather than taken from `robot_spec.yaml`.
-Static/dynamic avoidance is therefore PANOC-only until those terms are re-enabled and tuned.
-`mpc_helper`/`mpc_cost` carry smooth (softplus) counterparts — `smooth_cvx_intrusion`,
-`inside_ellipses_smooth`, `cost_inside_ellipses_smooth` — for that purpose, since IPOPT needs
-differentiable obstacle terms where the non-smooth `fmax` versions suffice for PANOC.
+##### Obstacle costs use smooth surrogates, not PANOC's
+
+Static and dynamic obstacle costs are active in `CasadiNMPC._stage_cost`, but they do **not**
+reuse PANOC's expressions. PANOC's `inside_cvx_polygon` multiplies clamped half-space residuals,
+so it is identically zero — gradient included — everywhere outside a polygon; PANOC tolerated
+that because its ALM penalty constraints did the real work, but it leaves IPOPT with no descent
+direction until a predicted state is already inside a wall. The CasADi path therefore routes
+through smooth counterparts in `mpc_helper`/`mpc_cost`:
+
+- `smooth_cvx_intrusion` summarises a polygon by its *smallest* half-space residual (positive
+  only inside), giving a metric penetration depth. Residuals are divided by the normal's length
+  first, because `polygon_halfspace_representation` does not return unit normals — without that
+  the depth, and hence the meaning of `qstcobs`, would scale with obstacle size.
+- `softplus` replaces `fmax`, in the overflow-safe form `max(x,0) + log1p(exp(-beta|x|))/beta`.
+  The naive `log(1+exp(beta*x))` overflows past `beta*x ≈ 700`, easily reached with plant
+  coordinates in the tens of metres.
+- `cost_inside_cvx_polygon_smooth` / `cost_inside_ellipses_smooth` wrap those, keeping the
+  originals' `alpha` handling and centimetre cost resolution.
+
+`CasadiNMPC._obstacle_beta` (default 10) sets sharpness: the repulsive tail outside an obstacle
+spans roughly `1/beta` metres. The soft-min under-reports depth by `log(n_edges)/beta`, so a
+point at the centre of a 1 m box measures 0.364 m rather than 0.5 m — harmless, since only the
+gradient matters, but worth knowing when reading cost values.
+
+Two consequences of the zero-filled parameter blocks are handled explicitly. Unused static slots
+(`Nstcobs` = 10, zero-filled) would otherwise contribute a constant `softplus(0)` term per slot —
+state-independent, so harmless to the optimum, but it obscures the reported cost; `_empty_slot_tol`
+gates them out. Unused dynamic slots carry `alpha = 0` and so already contribute nothing.
+
+Still off, and separate from the above: `cost_fleet_pred`, the *predictive* fleet term. Only
+current-step fleet collision is active, and its safety distances are hard-coded (0.05/0.1 m)
+rather than taken from `robot_spec.yaml`. Note also that `run_mpc.py` calls `run_step` with
+`full_dyn_obstacle_list=None`, so the dynamic-obstacle cost is correct but inert in this project
+as it stands — other robots reach the MPC through the fleet term, not through `o_d`.
 
 `CostMonitor` (`MONITOR_COST` in `run_mpc.py`) scores the *PANOC* cost expression, so it still
 requires OpenGEN. It is built lazily in `set_monitor`, which keeps the CasADi backend usable on
