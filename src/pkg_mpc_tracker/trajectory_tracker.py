@@ -23,6 +23,11 @@ else:
     CostMonitor = Any
     MonitoredCost = dict
 
+# 'PANOC' and 'PANOC_LIGHT' are two different builders (see build_solver.py) producing
+# compiled OpEn solvers with the same run-time call contract (parameter-vector layout,
+# `solver.run(p=...)`), so every solver_type check below treats them identically.
+_PANOC_SOLVER_TYPES = ('PANOC', 'PANOC_LIGHT')
+
 
 PathNode = tuple[float, float]
 
@@ -119,7 +124,7 @@ class TrajectoryTracker:
         self._casadi_nmpc: Optional[CasadiNMPC] = None
         self._casadi_problem = None
 
-        if self.config.solver_type == 'PANOC':
+        if self.config.solver_type in _PANOC_SOLVER_TYPES:
             self.__import_solver(use_tcp=use_tcp)
 
     def __import_solver(self, root_dir:str='', use_tcp:bool=False):
@@ -573,7 +578,7 @@ class TrajectoryTracker:
         Notes:
             The motion model (dynamics) is defined initially.
         """
-        if self.solver_type == 'PANOC':
+        if self.solver_type in _PANOC_SOLVER_TYPES:
             if self.use_tcp:
                 return self.run_solver_tcp(parameters, state, take_steps)
 

@@ -15,21 +15,29 @@ from pkg_robot.robot import RobotManager
 
 from configs import MpcConfiguration
 from configs import CircularRobotSpecification
+from configs import panoc_light_optimizer_name
 
 from visualizer.object import CircularVehicleVisualizer
 from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
 ### NMPC backends selectable at run time. Keys are what callers pass as `mpc_backend`;
 ### values are the exact strings `TrajectoryTracker` switches on.
-MPC_BACKENDS = {'casadi': 'Casadi', 'panoc': 'PANOC'}
+MPC_BACKENDS = {'casadi': 'Casadi', 'panoc': 'PANOC', 'panoc_light': 'PANOC_LIGHT'}
+
+# solver_type values that need a compiled OpEn/PANOC solver imported at run time -- as
+# opposed to 'Casadi', whose NLP is built in-process. 'PANOC' and 'PANOC_LIGHT' differ only
+# in which builder produced the compiled solver (see build_solver.py); the runtime call
+# contract (parameter-vector layout, `solver.run(p=...)`) is identical for both.
+PANOC_SOLVER_TYPES = {'PANOC', 'PANOC_LIGHT'}
 
 
 def resolve_mpc_backend(config_mpc: MpcConfiguration, mpc_backend=None, root_dir=None) -> str:
     """Apply the runtime backend choice on top of the config file, and sanity-check it.
 
     Args:
-        config_mpc: Loaded MPC configuration. Its `solver_type` is overwritten in place.
-        mpc_backend: 'casadi', 'panoc', or None to keep whatever the YAML says.
+        config_mpc: Loaded MPC configuration. Its `solver_type` (and, for 'panoc_light',
+            `optimizer_name`) are overwritten in place.
+        mpc_backend: 'casadi', 'panoc', 'panoc_light', or None to keep whatever the YAML says.
         root_dir: Project root, used to check that the PANOC solver has been built.
 
     Returns:
@@ -37,7 +45,7 @@ def resolve_mpc_backend(config_mpc: MpcConfiguration, mpc_backend=None, root_dir
 
     Raises:
         ValueError: The backend name is not recognised.
-        FileNotFoundError: PANOC was selected but its compiled solver is missing.
+        FileNotFoundError: A PANOC variant was selected but its compiled solver is missing.
     """
     if mpc_backend is not None:
         try:
@@ -46,15 +54,21 @@ def resolve_mpc_backend(config_mpc: MpcConfiguration, mpc_backend=None, root_dir
             raise ValueError(f"unknown mpc_backend {mpc_backend!r}, "
                              f"expected one of {sorted(MPC_BACKENDS)}") from None
 
-    # PANOC needs the Rust crate compiled by build_solver.py; failing here is far clearer
-    # than the ImportError raised deep inside the tracker when the .so is missing.
-    if config_mpc.solver_type == 'PANOC' and root_dir is not None:
+    # 'panoc_light' is built from the same config file as 'panoc' (see build_solver.py), so
+    # the only thing distinguishing the two compiled solvers is this derived name.
+    if config_mpc.solver_type == 'PANOC_LIGHT':
+        config_mpc.optimizer_name = panoc_light_optimizer_name(config_mpc.optimizer_name)
+
+    # PANOC (either variant) needs the Rust crate compiled by build_solver.py; failing here
+    # is far clearer than the ImportError raised deep inside the tracker when the .so is missing.
+    if config_mpc.solver_type in PANOC_SOLVER_TYPES and root_dir is not None:
         solver_path = os.path.join(root_dir, config_mpc.build_directory, config_mpc.optimizer_name)
         if not os.path.isdir(solver_path):
             raise FileNotFoundError(
-                f"The PANOC backend needs a compiled solver at '{solver_path}', which does not exist. "
-                f"Run 'python src/build_solver.py' from the project root (it must use the same config "
-                f"file as run_mpc), or switch to mpc_backend='casadi', which needs no build step."
+                f"The {config_mpc.solver_type} backend needs a compiled solver at '{solver_path}', "
+                f"which does not exist. Run 'python src/build_solver.py' from the project root (with "
+                f"panoc_builder set to match, and the same config file as run_mpc), or switch to "
+                f"mpc_backend='casadi', which needs no build step."
             )
     return config_mpc.solver_type
 

@@ -14,17 +14,17 @@ There is no test suite, linter, or package manifest — just scripts. All comman
 
 ```bash
 pip install -r requirements.txt     # or: uv pip install -r requirements.txt
-python src/build_solver.py          # ONLY for the PANOC backend: generate the OpEn solver into mpc_solver/
+python src/build_solver.py          # ONLY for the PANOC / panoc_light backends: generate the OpEn solver into mpc_solver/
 python src/main.py                  # run scheduler + simulation
 python src/schedule_visualization.py  # compare planned vs. actual ETAs (Gantt / deviation plots)
 ```
 
 External solvers that are not pip-only:
 - **Gurobi** (routing and path-changing sub-problems) — needs a license (academic named-user works).
-- **OpEn / PANOC** (NMPC, *only if* `solver_type: 'PANOC'`) — needs a Rust toolchain; `build_solver.py` compiles a Rust crate into `mpc_solver/` with Python bindings. `mpc_solver/` is gitignored, so it must be rebuilt after cloning and after any change to `config/mpc_*.yaml` that alters problem dimensions or penalty count.
+- **OpEn / PANOC** (NMPC, *only if* `solver_type: 'PANOC'` or `'PANOC_LIGHT'`) — needs a Rust toolchain; `build_solver.py` compiles a Rust crate into `mpc_solver/` with Python bindings. `mpc_solver/` is gitignored, so it must be rebuilt after cloning and after any change to `config/mpc_*.yaml` that alters problem dimensions or penalty count.
 
 Z3 (`z3-solver`) and CasADi are normal pip dependencies and need no license. The default NMPC
-backend is CasADi/IPOPT, which needs neither Rust nor a build step — see "Two NMPC backends".
+backend is CasADi/IPOPT, which needs neither Rust nor a build step — see "Three NMPC backends".
 
 ### Running experiments
 
@@ -37,7 +37,7 @@ Everything is toggled by editing literals in `src/main.py`'s `__main__` block �
 - `ignore_speed_ref` — drop the schedule's speed reference and track geometry only.
 - `recording` — save an mp4 into `Demo/`.
 - `scheduler_backend` — `"sp_comsat"` (default) or `"occbs"`; see "Second scheduler backend" below.
-- `mpc_backend` — `"casadi"` or `"panoc"`, selecting the NMPC solver; `None` falls back to `solver_type` in the YAML. Ignored when `naive_tracker` is `True`. See "Two NMPC backends" below.
+- `mpc_backend` — `"casadi"`, `"panoc"`, or `"panoc_light"`, selecting the NMPC solver; `None` falls back to `solver_type` in the YAML. Ignored when `naive_tracker` is `True`. See "Three NMPC backends" below.
 
 Simulation knobs that are *not* exposed through `main.py` live as module-level constants at the top of `run_mpc.py` (`CFG_FNAME`, `AUTORUN`, `MONITOR_COST`, `TIMEOUT`, `VERBOSE`).
 
@@ -100,24 +100,38 @@ The tracker is a small state machine (`work_mode` / `_mode`: `aligning`, `safe`,
 
 Configuration is YAML in `config/`, loaded through the dataclass-ish loaders in `src/configs.py`: `mpc_fast.yaml` / `mpc_default.yaml` (`MpcConfiguration`) and `robot_spec.yaml` (`CircularRobotSpecification`). Both `build_solver.py` and `run_mpc.py` name their config file independently — **keep them pointing at the same file**, or the compiled solver will not match the runtime problem dimensions.
 
-#### Two NMPC backends — the `mpc_backend` flag, or `solver_type` in `config/mpc_*.yaml`
+#### Three NMPC backends — the `mpc_backend` flag, or `solver_type` in `config/mpc_*.yaml`
 
-The tracker can drive either of two solvers over the *same* parameter vector; the block
-layout in `casadi_impl.py` deliberately mirrors `builder_panoc.py` field for field, so a
-parameter packed for one backend is valid for the other.
+The tracker can drive any of three solvers over the *same* parameter vector; the block
+layout in `casadi_impl.py`, `builder_panoc.py`, and `builder_panoc_light.py` deliberately
+mirrors field for field, so a parameter packed for one backend is valid for the others.
 
 | `mpc_backend` / `solver_type` | Module | Solver | Build step |
 |---|---|---|---|
 | `"casadi"` / `'Casadi'` (default) | `casadi_build/casadi_impl.py` | IPOPT via `ca.nlpsol`, direct multiple shooting | none — the NLP is constructed per robot in `load_motion_model` |
 | `"panoc"` / `'PANOC'` | `casadi_build/builder_panoc.py` | PANOC/OpEn, compiled Rust | `python src/build_solver.py` |
+| `"panoc_light"` / `'PANOC_LIGHT'` | `casadi_build/builder_panoc_light.py` | PANOC/OpEn, compiled Rust | `python src/build_solver.py` (with `panoc_builder = "panoc_light"`) |
 
 Pick one per run with `general_funct(..., mpc_backend="panoc")`; `run_mpc.resolve_mpc_backend`
 overwrites `config_mpc.solver_type` in place and prints the resolved choice. Passing `None`
 keeps whatever the YAML says, so the config file remains the default and the flag is the
-override. Selecting `"panoc"` without having run `build_solver.py` fails immediately with a
-message naming the missing path, rather than as an `ImportError` deep inside the tracker.
-Note `build_solver.py` always builds PANOC regardless of `solver_type`, so leaving the YAML on
-`'Casadi'` does not stop you rebuilding the PANOC solver.
+override. Selecting `"panoc"` or `"panoc_light"` without having run `build_solver.py` fails
+immediately with a message naming the missing path, rather than as an `ImportError` deep inside
+the tracker. `build_solver.py` has its own `panoc_builder` toggle (`"panoc"` or `"panoc_light"`,
+independent of `solver_type` in whichever YAML it loads) and always builds whichever one that
+says, so leaving the YAML on `'Casadi'` does not stop you rebuilding either PANOC variant.
+
+`builder_panoc_light.PanocLightBuilder` is a distinct, simpler formulation ported from the
+`MPC_light` reference project rather than folded into `builder_panoc.PanocBuilder`: fleet
+collision costs (current-step and predictive) are active every horizon step with no
+`critical_step` cutoff, and dynamic-obstacle costs are not wired in (upstream ships that code
+commented out; the port keeps it commented for parity). `panoc` and `panoc_light` are built
+from the *same* config file — same problem dimensions — so the two compiled solvers only need
+different `optimizer_name`s to coexist under one `build_directory`; that name is derived
+mechanically by `configs.panoc_light_optimizer_name` (appends `_light`) so `run_mpc.py` and
+`build_solver.py` can never compute a different name for the same build. Concretely: build
+both once via `build_solver.py`'s `panoc_builder` toggle (same `cfg_fname` both times), then
+switch between them at run time with nothing but `mpc_backend`.
 
 The CasADi backend puts the states in the decision vector (`w = [X, U]`, dynamics enforced as
 equality constraints `g`), whereas PANOC keeps only the inputs and rolls the dynamics out inside
@@ -174,13 +188,13 @@ as it stands — other robots reach the MPC through the fleet term, not through 
 ##### Casadi-only config keys
 
 These were literals inside `casadi_impl.py`; they now live in `config/mpc_*.yaml` and are loaded
-by `MpcConfiguration` (marked `[C]` there). **PANOC ignores every one of them** — it keeps its own
-built-in constants — so changing them cannot invalidate a compiled OpEn solver, and the two
-backends are *not* automatically comparable on these settings.
+by `MpcConfiguration` (marked `[C]` there). **Both PANOC backends ignore every one of them** —
+each keeps its own built-in constants — so changing them cannot invalidate a compiled OpEn
+solver, and the backends are *not* automatically comparable on these settings.
 
 | Key | Default | Replaces |
 |---|---|---|
-| `qfleet` / `qfleet_pred` | 1.0 / 0.5 | `_large_weight` / `_small_weight` (PANOC uses 1000 / 10) |
+| `qfleet` / `qfleet_pred` | 1.0 / 0.5 | `_large_weight` / `_small_weight` (PANOC uses 1000 / 10, always active in panoc_light) |
 | `fleet_safe_distance` / `fleet_critical_distance` | 0.1 / 0.05 m | the two literals in `_stage_cost` |
 | `critical_step` | 100 | `_critical_step` |
 | `obstacle_beta` | 10.0 | `_obstacle_beta` |

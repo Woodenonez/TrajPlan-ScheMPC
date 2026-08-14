@@ -3,6 +3,23 @@ from typing import Any, Union
 import yaml # type: ignore
 
 
+PANOC_LIGHT_SUFFIX = "_light"
+
+
+def panoc_light_optimizer_name(base_optimizer_name: str) -> str:
+    """Derive the panoc_light build's optimizer name from the base PANOC one.
+
+    `panoc` and `panoc_light` are built from the same MPC config file (same problem
+    dimensions, just two different builder implementations), so the only thing that has
+    to differ for them to coexist under the same `build_directory` is this name. Both
+    `run_mpc.resolve_mpc_backend` and `build_solver.py` call this so the two scripts can
+    never compute a different name for the same build.
+    """
+    if base_optimizer_name.endswith(PANOC_LIGHT_SUFFIX):
+        return base_optimizer_name
+    return base_optimizer_name + PANOC_LIGHT_SUFFIX
+
+
 class Configurator:
     FIRST_LOAD = False
     def __init__(self, yaml_fp: str, with_partition=False) -> None:
@@ -95,7 +112,7 @@ class MpcConfiguration(_Configuration):
         self.ndynobs = config.ndynobs # dimension of a dynamic-obstacle description
         self.Ndynobs = config.Ndynobs # number of dynamic obstacles
 
-        self.solver_type = config.solver_type           # Determines which solver to use ([P]ANOC or [C]asadi)
+        self.solver_type = config.solver_type           # Determines which solver to use ('PANOC', 'PANOC_LIGHT', or 'Casadi')
 
         self.max_solver_time = config.max_solver_time   # [P] maximum time for the solver to run
         self.build_directory = config.build_directory   # [P] directory to store the generated solver
