@@ -52,18 +52,18 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref, recording=recording)
 
 if __name__ == "__main__":
-    # problem = '4Small' # SAFETY COEFF 20
-    problem = '4SmallNu' # 4Small's graph, one destination per robot (single-goal MAPF)
+    problem = '4Small' # SAFETY COEFF 20
+    # problem = '4SmallNu' # 4Small's graph, one destination per robot (single-goal MAPF)
     # problem = "10Large"
 
     general_funct(
         problem,
-        scheduler = False,
+        scheduler = True,
         controller= True,
         naive_tracker= True,
         ignore_speed_ref= False,
         recording= False,
-        scheduler_backend= "occbs" # "sp_comsat" or "occbs"
+        scheduler_backend= "sp_comsat" # "sp_comsat" or "occbs"
     )
 
 
