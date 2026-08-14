@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Union
 
@@ -8,6 +10,7 @@ from .mpc_helper import *
 
 @dataclass
 class CostTerms:
+    cost_pos: ca.SX = cs.SX(0.0)
     cost_rpd: ca.SX = cs.SX(0.0)
     cost_rvd: ca.SX = cs.SX(0.0)
     cost_rtd: ca.SX = cs.SX(0.0)
@@ -76,6 +79,17 @@ def cost_inside_ellipses(state: ca.SX, ellipse_param: list[ca.SX], weight:Union[
     indicator = weight * alpha * ca.fmax(0.0, indicator)**2
     cost:ca.SX = ca.sum1(ca.sum2(indicator))
     assert cost.shape == (1,1)
+    return cost
+
+def cost_inside_ellipses_smooth(state: ca.SX, ellipse_param: list[ca.SX], weight: float = 1.0, beta: float = 10.0) -> ca.SX:
+    """Smooth counterpart of `cost_inside_ellipses` for gradient-based solvers.
+
+    Uses the unclamped indicator and a softplus in place of `fmax`, so the cost stays
+    differentiable where the robot crosses an obstacle boundary.
+    """
+    indicator = inside_ellipses_smooth(state.T, ellipse_param)
+    smooth_max = (1/beta) * ca.log(1 + ca.exp(beta * indicator)) # smooth approx of fmax(0, x)
+    cost:ca.SX = weight * ca.sum1(smooth_max**2)
     return cost
 
 def cost_fleet_collision(state: ca.SX, points: ca.SX, safe_distance: float, weight:Union[ca.SX, float]=1.0) -> ca.SX:

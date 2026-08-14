@@ -14,16 +14,17 @@ There is no test suite, linter, or package manifest — just scripts. All comman
 
 ```bash
 pip install -r requirements.txt     # or: uv pip install -r requirements.txt
-python src/build_solver.py          # generate the PANOC/OpEn solver into mpc_solver/ (do this first)
+python src/build_solver.py          # ONLY for the PANOC backend: generate the OpEn solver into mpc_solver/
 python src/main.py                  # run scheduler + simulation
 python src/schedule_visualization.py  # compare planned vs. actual ETAs (Gantt / deviation plots)
 ```
 
-Two external solvers are required and are not pip-only:
+External solvers that are not pip-only:
 - **Gurobi** (routing and path-changing sub-problems) — needs a license (academic named-user works).
-- **OpEn / PANOC** (NMPC) — needs a Rust toolchain; `build_solver.py` compiles a Rust crate into `mpc_solver/` with Python bindings. `mpc_solver/` is gitignored, so it must be rebuilt after cloning and after any change to `config/mpc_*.yaml` that alters problem dimensions or penalty count.
+- **OpEn / PANOC** (NMPC, *only if* `solver_type: 'PANOC'`) — needs a Rust toolchain; `build_solver.py` compiles a Rust crate into `mpc_solver/` with Python bindings. `mpc_solver/` is gitignored, so it must be rebuilt after cloning and after any change to `config/mpc_*.yaml` that alters problem dimensions or penalty count.
 
-Z3 is a normal pip dependency (`z3-solver`) and needs no license.
+Z3 (`z3-solver`) and CasADi are normal pip dependencies and need no license. The default NMPC
+backend is CasADi/IPOPT, which needs neither Rust nor a build step — see "Two NMPC backends".
 
 ### Running experiments
 
@@ -91,12 +92,51 @@ Note also that the two backends differ in more than conflict handling: sp_comsat
 `run_mpc.run_mpc` is the simulation loop. Per tick, per robot:
 
 1. `LocalTrajPlanner.get_local_ref` turns the schedule's (node, ETA) pairs into a **time-parameterized** reference over the horizon — the robot is asked to hit its scheduled ETA, not merely reach the node. This is where `ignore_speed_ref` takes effect.
-2. `TrajectoryTracker.run_step` (NMPC via the compiled PANOC solver) or `run_naive_step` (proportional heading control) produces actions. Other robots are fed in as dynamic obstacles via `RobotManager.get_other_robot_states`; the inflated map supplies static ones.
+2. `TrajectoryTracker.run_step` (NMPC, via whichever backend `solver_type` selects) or `run_naive_step` (proportional heading control) produces actions. Other robots are fed in as dynamic obstacles via `RobotManager.get_other_robot_states`; the inflated map supplies static ones.
 3. `robot.step` advances a `UnicycleModel`, with a guard that suppresses motion when already within tolerance of the last reference (and a looser tolerance in `safe` mode).
 
 The tracker is a small state machine (`work_mode` / `_mode`: `aligning`, `safe`, `work`, …) plus an `idle`/termination check per robot; the loop ends when every robot terminates or `TIMEOUT` ticks elapse. Actual arrival times are recorded and written to `data/schedule_demo2_data/Actual_<problem>.csv` for comparison against the planned schedule — that pairing is what `schedule_visualization.py` plots.
 
 Configuration is YAML in `config/`, loaded through the dataclass-ish loaders in `src/configs.py`: `mpc_fast.yaml` / `mpc_default.yaml` (`MpcConfiguration`) and `robot_spec.yaml` (`CircularRobotSpecification`). Both `build_solver.py` and `run_mpc.py` name their config file independently — **keep them pointing at the same file**, or the compiled solver will not match the runtime problem dimensions.
+
+#### Two NMPC backends — `solver_type` in `config/mpc_*.yaml`
+
+The tracker can drive either of two solvers over the *same* parameter vector; the block
+layout in `casadi_impl.py` deliberately mirrors `builder_panoc.py` field for field, so a
+parameter packed for one backend is valid for the other.
+
+| `solver_type` | Module | Solver | Build step |
+|---|---|---|---|
+| `'Casadi'` (default) | `casadi_build/casadi_impl.py` | IPOPT via `ca.nlpsol`, direct multiple shooting | none — the NLP is constructed per robot in `load_motion_model` |
+| `'PANOC'` | `casadi_build/builder_panoc.py` | PANOC/OpEn, compiled Rust | `python src/build_solver.py` |
+
+The CasADi backend puts the states in the decision vector (`w = [X, U]`, dynamics enforced as
+equality constraints `g`), whereas PANOC keeps only the inputs and rolls the dynamics out inside
+the cost. Consequences worth knowing:
+
+- **Warm starts are not interchangeable.** `CasadiNMPC.shift_warm_start` shifts `[X, U]`; an
+  all-zero guess would start the predicted trajectory at the origin rather than at the robot, so
+  `run_solver` seeds `X` with the current state repeated over the horizon.
+- **Headings must be continuous.** IPOPT sees a wrapped heading crossing ±π as a near-2π error.
+  `set_current_state` accumulates measured heading, `_unwrap_reference_states` unwraps the
+  reference along the horizon, and `_rebranch_warm_start` re-anchors a shifted guess onto the
+  current angular branch. The cost itself uses `mpc_helper.angle_error` (an `atan2` wrap) on both
+  backends.
+- **Each `run_solver` call is a short penalty homotopy**, re-solving `_casadi_max_outer` times with
+  `rho` scaled by `_casadi_rho_factor` and warm-started from the previous solve.
+
+**The CasADi backend currently ignores obstacles.** Only reference tracking, input/acceleration
+penalties, and *current-step* fleet collision are active in `CasadiNMPC._stage_cost`; the static
+and dynamic obstacle costs and the penalty-constraint terms are present but commented out, and
+the fleet safety distances are hard-coded (0.05/0.1 m) rather than taken from `robot_spec.yaml`.
+Static/dynamic avoidance is therefore PANOC-only until those terms are re-enabled and tuned.
+`mpc_helper`/`mpc_cost` carry smooth (softplus) counterparts — `smooth_cvx_intrusion`,
+`inside_ellipses_smooth`, `cost_inside_ellipses_smooth` — for that purpose, since IPOPT needs
+differentiable obstacle terms where the non-smooth `fmax` versions suffice for PANOC.
+
+`CostMonitor` (`MONITOR_COST` in `run_mpc.py`) scores the *PANOC* cost expression, so it still
+requires OpenGEN. It is built lazily in `set_monitor`, which keeps the CasADi backend usable on
+installations without OpenGEN and raises a clear error if monitoring is switched on without it.
 
 ### Supporting packages
 

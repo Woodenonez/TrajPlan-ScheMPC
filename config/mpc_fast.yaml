@@ -33,7 +33,7 @@ qdynobs: 10.0          # Cost for dynamic obstacle avoidance
 qpN: 0.0                # Terminal cost; error relative to final reference position         
 qthetaN: 0.0            # Terminal cost; error relative to final reference heading   
 # Building options in the optimizer
-solver_type: 'PANOC'
+solver_type: 'Casadi'   # 'Casadi' (IPOPT, built at run time) or 'PANOC' (OpEn, needs build_solver.py)
 max_solver_time: 100_000        # micros (0.1 sec)
 build_type: 'release'           # Can have 'debug' or 'release'
 build_directory: 'mpc_solver'   # Name of the directory where the build is created
