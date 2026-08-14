@@ -60,7 +60,7 @@ if __name__ == "__main__":
         problem,
         scheduler = False,
         controller= True,
-        naive_tracker= True,
+        naive_tracker= False, # True = proportional baseline, False = NMPC (solver_type in config/mpc_fast.yaml)
         ignore_speed_ref= False,
         recording= False,
         scheduler_backend= "occbs" # "sp_comsat" or "occbs"
