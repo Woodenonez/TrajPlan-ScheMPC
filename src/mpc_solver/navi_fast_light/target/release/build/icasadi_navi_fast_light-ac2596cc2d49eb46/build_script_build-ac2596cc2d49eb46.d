@@ -1,0 +1,5 @@
+/Users/sabinoroselli/PycharmProjects/TrajPlan-ScheMPC/src/mpc_solver/navi_fast_light/target/release/build/icasadi_navi_fast_light-ac2596cc2d49eb46/build_script_build-ac2596cc2d49eb46: icasadi_navi_fast_light/build.rs
+
+/Users/sabinoroselli/PycharmProjects/TrajPlan-ScheMPC/src/mpc_solver/navi_fast_light/target/release/build/icasadi_navi_fast_light-ac2596cc2d49eb46/build_script_build-ac2596cc2d49eb46.d: icasadi_navi_fast_light/build.rs
+
+icasadi_navi_fast_light/build.rs:

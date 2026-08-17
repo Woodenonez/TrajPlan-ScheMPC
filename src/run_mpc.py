@@ -76,7 +76,7 @@ def resolve_mpc_backend(config_mpc: MpcConfiguration, mpc_backend=None, root_dir
 def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, recording=False, mpc_backend=None):
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
-    CFG_FNAME = "mpc_fast.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
+    CFG_FNAME = "mpc_default.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
     MAP_ONLY = True
     AUTORUN = True # if false, press key (in the plot window) to continue
     MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
