@@ -36,7 +36,7 @@ Everything is toggled by editing literals in `src/main.py`'s `__main__` block �
 - `naive_tracker` — use the simple proportional heading controller (`TrajectoryTracker.run_naive_step`) instead of the NMPC. This is the paper's baseline.
 - `ignore_speed_ref` — drop the schedule's speed reference and track geometry only.
 - `recording` — save an mp4 into `Demo/`.
-- `scheduler_backend` — `"sp_comsat"` (default) or `"occbs"`; see "Second scheduler backend" below.
+- `scheduler_backend` — `"sp_comsat"` (default), `"occbs"`, or `"aoccbs"`; see "Second scheduler backend" and "Third scheduler backend" below.
 - `mpc_backend` — `"casadi"`, `"panoc"`, or `"panoc_light"`, selecting the NMPC solver; `None` falls back to `solver_type` in the YAML. Ignored when `naive_tracker` is `True`. See "Three NMPC backends" below.
 
 Simulation knobs that are *not* exposed through `main.py` live as module-level constants at the top of `run_mpc.py` (`CFG_FNAME`, `AUTORUN`, `MONITOR_COST`, `TIMEOUT`, `VERBOSE`).
@@ -87,6 +87,66 @@ Because OC-CBS takes a single goal per agent while a robot may have a chain of t
 **Multi-waypoint instances currently do not work.** With staggered release times, `4Small`'s leg 1 finds no solution even at a 300s limit, while the same leg solves instantly with all releases at zero, with any single agent released late, and with all agents released late uniformly — only the staggered combination fails. This has not been root-caused; it is not a floating-point artifact, and it reproduces with the pre-release wait section disabled. A plausible but unverified cause is CCBS's assumption that an agent which reaches its goal stays there forever, which turns early finishers into permanent obstacles for late-released agents. Until this is understood, use the `occbs` backend only on single-goal instances and `sp_comsat` for the rest.
 
 Note also that the two backends differ in more than conflict handling: sp_comsat routes each vehicle **back to its start**, so on `4SmallNu` it reports makespan 250.12 against OC-CBS's 42. The schedules are not comparable on makespan.
+
+### Third scheduler backend — `src/pkg_sche/aoccbs/`
+
+A second alternative to `sp_comsat`, driving **AOC-CBS** (Anytime-Optimal Continuous-time CBS) from
+[Adcombrink/AOC-CBS](https://github.com/Adcombrink/AOC-CBS). `runner.AOCCBS(problem)` mirrors
+`OCCBS`'s and `Compo_slim`'s return shape, so `main.py` writes the same `schedule.csv` either way.
+It shares `occbs`'s core restriction — no task-to-vehicle assignment, so by default an instance
+must already have every job pinned to a single ATR with precedence forming one chain per robot
+(`4Small` and `4SmallNu` both qualify) — and, like `occbs`, silently ignores `TW` rather than
+checking it.
+
+That restriction can be lifted with `AOCCBS(problem, assign_via_routing=True)` (or, from
+`main.py`, the `assign_via_routing` flag on `general_funct`): it runs `sp_comsat`'s Gurobi
+routing sub-solver (`E_Routing_Gurobi.routing`, the same MILP `Compo_slim` uses) over the
+instance first to decide which robot gets which job and in what order — jobs may then list
+several candidate ATRs, exactly as `sp_comsat` itself allows — and hands the resulting per-robot
+chains to AOC-CBS, which only has to solve the trajectories. `_robot_task_specs_via_routing`
+builds the routing sub-solver's `Instance` via `Compo_slim.build_instance` (factored out of
+`Compo_slim` for this reuse) and keeps only each route's real job visits — the 'start'/'end'
+depot bookends and any 'recharge' stops are dropped, since AOC-CBS has no notion of a battery.
+This still inherits the routing MILP's own limits: it honours `TW`, precedence and autonomy but,
+like the rest of `E_Routing_Gurobi`, always routes every vehicle back to its start (see the
+makespan note below), and needs Gurobi even though the plain `assign_via_routing=False` path
+does not.
+
+Unlike OC-CBS, AOC-CBS is a pure-Python library and needs no compiler: it is vendored, unbuilt,
+into the gitignored `external/AOC-CBS` and installed editable —
+
+```bash
+git clone https://github.com/Adcombrink/AOC-CBS.git external/AOC-CBS
+pip install -e external/AOC-CBS
+pip install sortedcontainers   # a real runtime dependency AOC-CBS's pyproject.toml omits
+```
+
+— then `src/pkg_sche/aoccbs/aoccbs_node_link_data.patch` must be applied (`cd external/AOC-CBS &&
+git apply ../../src/pkg_sche/aoccbs/aoccbs_node_link_data.patch`), reapplied after any re-clone.
+It fixes a genuine upstream/networkx incompatibility, not a project-specific behaviour change: at
+networkx 3.4.2 (this project's pinned version) `json_graph.node_link_data()` still defaults to a
+`'links'` key, but every AOC-CBS state-graph saver reads back `'edges'`, so saving any state graph
+raises `KeyError: 'edges'` until the call sites pass `edges="edges"` explicitly.
+
+**The key advantage over `occbs`: AOC-CBS agents natively carry an ordered task sequence with
+per-task service times**, rather than one start and one goal. `runner.AOCCBS` hands each robot's
+whole job chain to the solver as a single agent instead of cutting it into legs, so it does not
+need `occbs`'s release-time machinery and is not subject to the "multi-waypoint instances
+currently do not work" limitation documented above for `occbs` — `4Small`'s full multi-task
+schedule solves directly. On `4SmallNu` (the single-goal case both backends support) the two
+independent solvers agree exactly: both report makespan 42.
+
+AOC-CBS keeps its own model library and preprocessing cache (state graphs, per-graph all-pairs
+distance matrices, and pairwise intersection-interval files, the latter two expensive to
+recompute) under `external/AOC-CBS/scratch/` and `external/AOC-CBS/cache/` — already inside the
+gitignored `external/` tree. `runner._build_state_graph` names the state graph
+`TrajPlan_<problem>` and skips rebuilding it (and thus recomputing its cache) if that id already
+exists; if a test case's node graph changes, delete
+`external/AOC-CBS/scratch/models/StateGraph_TrajPlan_<problem>.json` and the matching files under
+`external/AOC-CBS/cache/`, or the new graph will silently solve against the old one's cache. Both
+backends assume unit robot speed — an edge's travel time is its raw Euclidean length, matching
+`sp_comsat`'s and OC-CBS's `support_functions.json_parser`/`roadmap.py` — so travel times are
+comparable across all three backends.
 
 ### Low-level control — `src/pkg_mpc_tracker/`, `src/pkg_motion_plan/`
 
