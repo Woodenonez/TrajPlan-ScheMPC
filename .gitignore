@@ -1,4 +1,6 @@
 /mpc_solver
+/external
+/data/occbs_work
 /.vscode
 /.mypy_cache
 /archived
@@ -9,3 +11,7 @@ __pycache__
 
 draft.py
 /Demo/
+
+# Claude Code worktrees. These are git checkouts nested inside the repo, so a bare
+# `git add -A` records them as submodule gitlinks rather than ignoring them.
+/.claude/worktrees/

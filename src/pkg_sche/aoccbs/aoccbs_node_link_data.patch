@@ -1,0 +1,46 @@
+diff --git a/src/aoccbs/models/core/loaders.py b/src/aoccbs/models/core/loaders.py
+index f93b1f9..9cb1755 100644
+--- a/src/aoccbs/models/core/loaders.py
++++ b/src/aoccbs/models/core/loaders.py
+@@ -164,7 +164,10 @@ def save_model1_state_graph(state_graph, folder_path=None, id=None, precision=12
+     id = id if id is not None else state_graph.id
+ 
+     # Convert graph to a JSON-serializable format
+-    graph_data = json_graph.node_link_data(state_graph.graph)
++    # TrajPlan-ScheMPC: explicit edges= pins the output key to 'edges' regardless of the
++    # installed networkx's default (older ones emit 'links'; the rest of this module always
++    # reads 'edges'), avoiding a KeyError on save.
++    graph_data = json_graph.node_link_data(state_graph.graph, edges="edges")
+ 
+     # Round numerical values to specified precision, and convert to plain floats: a graph read back
+     # from file holds numpy positions, which json cannot serialize and rounding leaves as numpy.
+diff --git a/src/aoccbs/models/model2/roadmap.py b/src/aoccbs/models/model2/roadmap.py
+index ae966b4..b31ef75 100644
+--- a/src/aoccbs/models/model2/roadmap.py
++++ b/src/aoccbs/models/model2/roadmap.py
+@@ -150,7 +150,9 @@ def save_model2_state_graph(sg: Model2StateGraph, folder_path=None, id: str = No
+         folder_path = paths.MODEL_LIBRARY_DIR
+     id = id if id is not None else sg.id
+ 
+-    graph_data = json_graph.node_link_data(sg.graph)
++    # TrajPlan-ScheMPC: explicit edges= pins the output key regardless of the installed
++    # networkx's default (older ones emit 'links'; this module always reads 'edges').
++    graph_data = json_graph.node_link_data(sg.graph, edges="edges")
+     graph_data['nodes'] = [_to_jsonable(node) for node in graph_data['nodes']]
+     graph_data['edges'] = [_to_jsonable(edge) for edge in graph_data['edges']]
+ 
+diff --git a/src/aoccbs/models/model3/roadmap.py b/src/aoccbs/models/model3/roadmap.py
+index c0ec2d7..c4bce73 100644
+--- a/src/aoccbs/models/model3/roadmap.py
++++ b/src/aoccbs/models/model3/roadmap.py
+@@ -220,7 +220,9 @@ def save_model3_state_graph(sg: Model3StateGraph, folder_path=None, id: str = No
+         folder_path = paths.MODEL_LIBRARY_DIR
+     id = id if id is not None else sg.id
+ 
+-    graph_data = json_graph.node_link_data(sg.graph)
++    # TrajPlan-ScheMPC: explicit edges= pins the output key regardless of the installed
++    # networkx's default (older ones emit 'links'; this module always reads 'edges').
++    graph_data = json_graph.node_link_data(sg.graph, edges="edges")
+     graph_data['nodes'] = [_to_jsonable(node) for node in graph_data['nodes']]
+     graph_data['edges'] = [_to_jsonable(edge) for edge in graph_data['edges']]
+ 

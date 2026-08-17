@@ -16,15 +16,16 @@ from .path_changer_Gurobi import changer
 from .route_checker_slim import routes_checking
 
 
-def Compo_slim(problem):
+def build_instance(problem):
+    """Parse a test case into a populated `Instance` (graph, tasks, ATRs), ready for
+    `E_Routing_Gurobi.routing` and `scheduling_model.schedule`.
 
-    print('COMPOSITIONAL ALGORITHM #### SLIM ####')
-    print('instance',problem)
-
-    starting_time = tm()
-
+    Factored out of `Compo_slim` so other schedulers can reuse the same instance-building
+    logic -- e.g. `pkg_sche.aoccbs.runner` calls this to get an assignment out of
+    `E_Routing_Gurobi` before handing per-robot chains to AOC-CBS.
+    """
     # first of all, let's parse the json file with the plant layout and the tasks info
-    jobs, nodes, edges, Autonomy, ATRs, charging_coefficient,Big_Number,hubs\
+    jobs, nodes, edges, Autonomy, ATRs, charging_coefficient, Big_Number, hubs \
         = json_parser(f'data/test_cases/{problem}.json')
     # now let's build the graph out of nodes and edges
     graph = nx.DiGraph()
@@ -85,6 +86,18 @@ def Compo_slim(problem):
                     j
                 )
             )
+
+    return The_Instance, ATRs
+
+
+def Compo_slim(problem):
+
+    print('COMPOSITIONAL ALGORITHM #### SLIM ####')
+    print('instance',problem)
+
+    starting_time = tm()
+
+    The_Instance, ATRs = build_instance(problem)
 
     ############# LET'S INITIALIZE A BUNCH OF STUFF #############
     node_sequence = []

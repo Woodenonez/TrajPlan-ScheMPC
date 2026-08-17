@@ -3,6 +3,23 @@ from typing import Any, Union
 import yaml # type: ignore
 
 
+PANOC_LIGHT_SUFFIX = "_light"
+
+
+def panoc_light_optimizer_name(base_optimizer_name: str) -> str:
+    """Derive the panoc_light build's optimizer name from the base PANOC one.
+
+    `panoc` and `panoc_light` are built from the same MPC config file (same problem
+    dimensions, just two different builder implementations), so the only thing that has
+    to differ for them to coexist under the same `build_directory` is this name. Both
+    `run_mpc.resolve_mpc_backend` and `build_solver.py` call this so the two scripts can
+    never compute a different name for the same build.
+    """
+    if base_optimizer_name.endswith(PANOC_LIGHT_SUFFIX):
+        return base_optimizer_name
+    return base_optimizer_name + PANOC_LIGHT_SUFFIX
+
+
 class Configurator:
     FIRST_LOAD = False
     def __init__(self, yaml_fp: str, with_partition=False) -> None:
@@ -95,7 +112,7 @@ class MpcConfiguration(_Configuration):
         self.ndynobs = config.ndynobs # dimension of a dynamic-obstacle description
         self.Ndynobs = config.Ndynobs # number of dynamic obstacles
 
-        self.solver_type = config.solver_type           # Determines which solver to use ([P]ANOC or [C]asadi)
+        self.solver_type = config.solver_type           # Determines which solver to use ('PANOC', 'PANOC_LIGHT', or 'Casadi')
 
         self.max_solver_time = config.max_solver_time   # [P] maximum time for the solver to run
         self.build_directory = config.build_directory   # [P] directory to store the generated solver
@@ -113,6 +130,19 @@ class MpcConfiguration(_Configuration):
         self.qtheta = config.qtheta                     # Cost for heading  deviation each time step to the reference
         self.qstcobs = config.qstcobs                   # Cost for static obstacle avoidance
         self.qdynobs = config.qdynobs                   # Cost for dynamic obstacle avoidance
-        self.qpN = config.qpN                           # Terminal cost; error relative to final reference position       
+        self.qpN = config.qpN                           # Terminal cost; error relative to final reference position
         self.qthetaN = config.qthetaN                   # Terminal cost; error relative to final reference heading
+
+        # [C] Casadi-only knobs. These were hard-coded literals in casadi_impl.py; PANOC keeps
+        # its own built-in values and ignores all of them.
+        self.qfleet = config.qfleet                     # [C] Cost for collision with other robots, current step
+        self.qfleet_pred = config.qfleet_pred           # [C] Cost for collision with other robots, over the horizon
+        self.fleet_safe_distance = config.fleet_safe_distance          # [C] meters, or None to derive from robot spec
+        self.fleet_critical_distance = config.fleet_critical_distance  # [C] meters, or None to derive from robot spec
+        self.critical_step = config.critical_step       # [C] Horizon step past which current-step fleet/dyn terms stop
+        self.obstacle_beta = config.obstacle_beta       # [C] Sharpness of the smooth obstacle costs
+        self.rho_init = config.rho_init                 # [C] Penalty homotopy, initial weight
+        self.rho_factor = config.rho_factor             # [C] Penalty homotopy, weight multiplier per outer iteration
+        self.max_outer_iter = config.max_outer_iter     # [C] Penalty homotopy, outer solves per control step
+        self.max_solver_iter = config.max_solver_iter   # [C] ipopt.max_iter
 
