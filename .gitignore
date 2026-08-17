@@ -5,6 +5,7 @@
 /.mypy_cache
 /archived
 .venv/
+.idea/
 
 __pycache__
 
