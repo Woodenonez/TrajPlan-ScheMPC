@@ -63,7 +63,7 @@ if __name__ == "__main__":
     general_funct(
         problem,
         scheduler = False,
-        controller= True,
+        controller= False,
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
