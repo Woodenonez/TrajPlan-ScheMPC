@@ -350,9 +350,14 @@ class MpcPlotInLoop:
         elif self.save_to_path is not None:
             if self.skip_counter >= self.save_params['skip_frame']:
                 self.skip_counter = 0
-                save_img = np.frombuffer(self.fig.canvas.tostring_rgb(), dtype=np.uint8)
-                save_img = save_img.reshape(6000,6000,3)#self.fig.canvas.get_width_height()[::-1] + (3,))
-                save_img_bgr = cv2.cvtColor(save_img, cv2.COLOR_RGB2BGR)
+                # `buffer_rgba` arrives already shaped (H, W, 4), so this holds for any figure
+                # size, aspect ratio and DPI scaling. Both previous forms were fragile: the
+                # hard-coded (6000, 6000, 3) assumed a square 10in x 300dpi figure on a 2x HiDPI
+                # display, while `get_width_height()` reports logical rather than physical pixels
+                # and so breaks on exactly the displays the constant was added for. `tostring_rgb`
+                # is deprecated since matplotlib 3.8 and removed in 3.10.
+                save_img = np.asarray(self.fig.canvas.buffer_rgba())
+                save_img_bgr = cv2.cvtColor(save_img, cv2.COLOR_RGBA2BGR)
                 self.video_writer.write(cv2.resize(save_img_bgr, self.save_params['frame_size']))
             else:
                 self.skip_counter += 1

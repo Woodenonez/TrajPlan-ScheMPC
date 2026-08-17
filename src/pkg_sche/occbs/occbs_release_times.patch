@@ -1,0 +1,87 @@
+diff --git a/const.h b/const.h
+index 7159eb2..be5ee9f 100644
+--- a/const.h
++++ b/const.h
+@@ -25,6 +25,7 @@
+     #define CNS_TAG_START_I         "start_i"
+     #define CNS_TAG_START_J         "start_j"
+     #define CNS_TAG_START_ID        "start_id"
++    #define CNS_TAG_START_TIME      "start_time"
+     #define CNS_TAG_GOAL_I          "goal_i"
+     #define CNS_TAG_GOAL_J          "goal_j"
+     #define CNS_TAG_GOAL_ID         "goal_id"
+diff --git a/sipp.cpp b/sipp.cpp
+index 6e1ab35..bdb06b8 100644
+--- a/sipp.cpp
++++ b/sipp.cpp
+@@ -392,7 +392,9 @@ Path SIPP::find_path(Agent agent, const Map &map, std::list<Constraint> cons, He
+         {
+             if(i == 0)
+             {
+-                starts = {get_endpoints(agent.start_id, agent.start_i, agent.start_j, 0, CN_INFINITY).at(0)};
++                starts = {get_endpoints(agent.start_id, agent.start_i, agent.start_j, agent.start_time, CN_INFINITY).at(0)};
++                // TrajPlan-ScheMPC: as in the non-landmark branch below.
++                starts[0].g = std::max(agent.start_time, starts[0].interval.first);
+                 goals = get_endpoints(landmarks[i].id1, map.get_i(landmarks[i].id1), map.get_j(landmarks[i].id1), landmarks[i].t1, landmarks[i].t2);
+             }
+             else
+@@ -487,7 +489,9 @@ Path SIPP::find_path(Agent agent, const Map &map, std::list<Constraint> cons, He
+     }
+     else
+     {
+-        starts = {get_endpoints(agent.start_id, agent.start_i, agent.start_j, 0, CN_INFINITY).at(0)};
++        starts = {get_endpoints(agent.start_id, agent.start_i, agent.start_j, agent.start_time, CN_INFINITY).at(0)};
++        // TrajPlan-ScheMPC: the search starts when the agent is released, not at 0.
++        starts[0].g = std::max(agent.start_time, starts[0].interval.first);
+         goals = {get_endpoints(agent.goal_id, agent.goal_i, agent.goal_j, 0, CN_INFINITY).back()};
+         parts = find_partial_path(starts, goals, map, h_values);
+         expanded = int(close.size());
+@@ -495,6 +499,18 @@ Path SIPP::find_path(Agent agent, const Map &map, std::list<Constraint> cons, He
+             return Path();
+         result = parts[0];
+     }
++    // TrajPlan-ScheMPC: make the pre-release wait an explicit leading section so
++    // that conflict checking sees the agent occupying its start node until it is
++    // released. check_paths turns consecutive nodes into moves, and a move whose
++    // endpoints coincide is a wait, so this is the parked interval. Skipped when
++    // the release time is zero, which would otherwise create a zero-length move
++    // and make check_conflict divide by zero.
++    if(agent.start_time > CN_EPSILON && !result.nodes.empty())
++    {
++        Node parked = result.nodes.front();
++        parked.g = 0;
++        result.nodes.insert(result.nodes.begin(), parked);
++    }
+     result.nodes.shrink_to_fit();
+     result.cost = result.nodes.back().g;
+     result.agentID = agent.id;
+diff --git a/structs.h b/structs.h
+index db34430..898d3dd 100644
+--- a/structs.h
++++ b/structs.h
+@@ -23,8 +23,11 @@ struct Agent
+     int start_id, goal_id;
+     int id;
+     double size;
++    // TrajPlan-ScheMPC: earliest time the agent may leave its start node. It is
++    // parked there over [0, start_time). Zero reproduces upstream behaviour.
++    double start_time;
+     Agent(int s_id = -1, int g_id = -1, int _id = -1)
+-        :start_id(s_id), goal_id(g_id), id(_id) {}
++        :start_id(s_id), goal_id(g_id), id(_id), start_time(0) {}
+ };
+ 
+ struct gNode
+diff --git a/task.cpp b/task.cpp
+index 72efeb5..0b1211e 100644
+--- a/task.cpp
++++ b/task.cpp
+@@ -33,6 +33,8 @@ bool Task::get_task(const char *FileName, int k)
+         a.goal_i = agent->DoubleAttribute(CNS_TAG_GOAL_I);
+         a.goal_j = agent->DoubleAttribute(CNS_TAG_GOAL_J);
+         a.goal_id = agent->IntAttribute(CNS_TAG_GOAL_ID);
++        // TrajPlan-ScheMPC: optional release time; absent attribute yields 0.
++        a.start_time = agent->DoubleAttribute(CNS_TAG_START_TIME);
+         a.id = int(agents.size());
+         agents.push_back(a);
+         if(int(agents.size()) == k)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import casadi.casadi as cs # type: ignore
 
 
@@ -12,6 +14,29 @@ def dist_to_points_square(point: cs.SX, points: cs.SX) -> cs.SX:
         The (1*m)-dim squared distance from the target point to each point in the set.
     """
     return cs.sum1((point-points)**2) # sum1 is summing each column
+
+def softplus(x: cs.SX, beta: float = 10.0) -> cs.SX:
+    """Smooth approximation of `fmax(0, x)`, in the same units as `x`.
+
+    Written in the overflow-safe form `max(x,0) + log1p(exp(-beta*|x|))/beta`, which is
+    algebraically identical to `log(1+exp(beta*x))/beta` but never evaluates `exp` of a
+    large positive number -- the naive form overflows once `beta*x` exceeds ~700, which
+    is easily reached with plant coordinates in the tens of metres.
+
+    Note `softplus(0) = log(2)/beta`, so the approximation leaves a soft tail of width
+    ~1/beta on the outside of a boundary. That tail is what gives a gradient-based solver
+    something to descend before it has actually penetrated the obstacle.
+    """
+    return cs.fmax(x, 0) + cs.log(1 + cs.exp(-beta*cs.fabs(x)))/beta
+
+
+def wrap_angle(angle: cs.SX) -> cs.SX:
+    """Wrap an angle expression into [-pi, pi]."""
+    return cs.atan2(cs.sin(angle), cs.cos(angle))
+
+def angle_error(angle: cs.SX, reference: cs.SX) -> cs.SX:
+    """Return the shortest signed angular difference angle-reference."""
+    return wrap_angle(angle - reference)
 
 def dist_to_lineseg(point: cs.SX, line_segment: cs.SX) -> cs.SX:
     """Calculate the distance from a target point to a line segment.
@@ -50,6 +75,19 @@ def inside_ellipses(point: cs.SX, ellipse_param: list[cs.SX]) -> cs.SX:
     is_inside = 1 - ((x-cx)*cs.cos(ang)+(y-cy)*cs.sin(ang))**2 / (rx+1e-6)**2 - ((x-cx)*cs.sin(ang)-(y-cy)*cs.cos(ang))**2 / (ry+1e-6)**2
     return is_inside
 
+def inside_ellipses_smooth(point: cs.SX, ellipse_param: list[cs.SX]) -> cs.SX:
+    """Smooth counterpart of `inside_ellipses` for gradient-based solvers.
+
+    Returns the normalized signed distance directly (1.0 at the centre, 0.0 on the
+    boundary, negative outside) without the `fmax` clamp, so the expression stays
+    differentiable everywhere -- which IPOPT needs and PANOC does not.
+    """
+    x, y = point[0], point[1]
+    cx, cy, rx, ry, ang = ellipse_param[0], ellipse_param[1], ellipse_param[2], ellipse_param[3], ellipse_param[4]
+    dist_norm = 1 - ((x-cx)*cs.cos(ang)+(y-cy)*cs.sin(ang))**2 / (rx+1e-6)**2 \
+                  - ((x-cx)*cs.sin(ang)-(y-cy)*cs.cos(ang))**2 / (ry+1e-6)**2
+    return dist_norm
+
 def inside_cvx_polygon(point: cs.SX, b: cs.SX, a0: cs.SX, a1: cs.SX) -> cs.SX:
     """Check if a point is inside a convex polygon defined by half-spaces.
     
@@ -72,6 +110,41 @@ def inside_cvx_polygon(point: cs.SX, b: cs.SX, a0: cs.SX, a1: cs.SX) -> cs.SX:
     for i in range(result.shape[0]):
         is_inside *= cs.fmax(0, result[i])
     return is_inside
+
+def smooth_cvx_intrusion(point: cs.SX, b: cs.SX, a0: cs.SX, a1: cs.SX, beta: float = 10.0) -> cs.SX:
+    """Penetration depth into a convex polygon, in metres, smooth enough for IPOPT.
+
+    `inside_cvx_polygon` multiplies clamped residuals, so it is exactly zero -- gradient
+    included -- everywhere outside the polygon. PANOC could live with that because its
+    ALM penalty constraints did the real work, but it leaves a gradient-based solver no
+    descent direction until a predicted state is already inside an obstacle.
+
+    Here the polygon is instead summarised by the *smallest* half-space residual, which is
+    positive only when the point satisfies every half-space, i.e. only inside the polygon.
+    Residuals are divided by the normal's length first, because
+    `TrajectoryTracker.polygon_halfspace_representation` does not return unit normals --
+    without that the depth would scale with obstacle size and the weight would mean
+    something different for every obstacle.
+
+    Args:
+        point: The (n*1)-dim target point.
+        b, a0, a1: Shape (1*m) half-space parameters, as in `inside_cvx_polygon`.
+        beta: Sharpness. The soft boundary spans roughly 1/beta metres.
+
+    Returns:
+        A (1*1) non-negative depth: ~0 outside, approaching the true distance to the
+        nearest edge as the point moves inside.
+    """
+    eq_mtx: cs.SX = cs.vertcat(b, -a0, -a1)
+    residuals: cs.SX = cs.mtimes(eq_mtx.T, cs.vertcat(1, point[0], point[1]))
+    scale: cs.SX = cs.sqrt(a0.T**2 + a1.T**2 + 1e-12) # normal lengths, (m*1)
+    residuals = residuals / scale # now a signed distance in metres
+
+    # Smooth min over the half-spaces, shifted by the exact min so `exp` only ever sees
+    # non-positive arguments. Algebraically identical to -log(sum(exp(-beta*r)))/beta.
+    r_min = cs.mmin(residuals)
+    soft_min = r_min - cs.log(cs.sum1(cs.exp(-beta*(residuals - r_min))))/beta
+    return softplus(soft_min, beta)
 
 def outside_cvx_polygon(point: cs.SX, b: cs.SX, a0: cs.SX, a1: cs.SX) -> cs.SX:
     """Check if a point is outside a convex polygon defined by half-spaces.
