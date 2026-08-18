@@ -186,11 +186,26 @@ class LocalTrajPlanner:
         assert self._current_target_node is not None
         assert self._current_target_node_idx is not None
 
-        lb_idx = max(self._base_traj_docking_idx-1, 0)
+        # At a path reversal (the robot turns ~180 degrees in place, e.g. backtracking
+        # the same edge) the outbound and inbound samples run back over the same (x,y)
+        # positions with opposite headings -- nearest-position search can't tell them
+        # apart anywhere along the corridor, not just at the pivot. Letting the docking
+        # index regress (the old `-1` allowance) lets it walk back across a reversal it
+        # already committed past, and even without that, near-ties right at the fold
+        # flip on sub-mm position noise. Both make the reference heading -- and the
+        # tracker's aligning/work mode -- chatter forever instead of completing the
+        # turn. Fix both: never regress the docking index, and among forward
+        # candidates within a small tolerance of the true nearest, keep the one
+        # closest to the previous index instead of whichever wins the raw argmin.
+        lb_idx = self._base_traj_docking_idx
         ub_idx = min(self._base_traj_docking_idx+idx_check_range, len(self._base_traj)-1)
 
         distances = [math.hypot(current_pos[0]-x[0], current_pos[1]-x[1]) for x in self._base_traj[lb_idx:ub_idx]]
-        self._base_traj_docking_idx = lb_idx + distances.index(min(distances))
+        min_dist = min(distances)
+        tie_tol = 1e-3
+        tied = [i for i, d in enumerate(distances) if d <= min_dist + tie_tol]
+        best = min(tied, key=lambda i: abs((lb_idx + i) - self._base_traj_docking_idx))
+        self._base_traj_docking_idx = lb_idx + best
 
         if self._ref_path_time is not None:
             distance_to_current_node = math.hypot(current_pos[0]-self._current_target_node[0], current_pos[1]-self._current_target_node[1])
