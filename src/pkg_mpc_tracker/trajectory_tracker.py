@@ -383,7 +383,16 @@ class TrajectoryTracker:
         self.ref_states = ref_states
         if ref_speed is not None:
             self.base_speed = ref_speed
-        else:
+        elif self._mode != 'aligning':
+            # Only default to 'work' here when a heading correction isn't already in
+            # progress. _run_step's own theta_diff check, which runs on every tick
+            # right after this call, is the sole authority on entering/exiting
+            # 'aligining' -- unconditionally resetting to 'work' here discarded that
+            # decision every single tick (this project always calls set_ref_states
+            # with ref_speed=None, since ignore_speed_ref=True in practice), so a
+            # heading correction could never accumulate across ticks: it was always
+            # re-decided from scratch, one tick at a time, with a fresh 'work' reset
+            # forced in between.
             self.set_work_mode(mode='work', use_predefined_speed=True)
 
     def check_termination_condition(self, external_check=True) -> bool:
@@ -506,7 +515,19 @@ class TrajectoryTracker:
         #     speed_decay = min(max(theta_diff/180, 0.0), 1.0)
         #     self.set_work_mode(mode='work', use_predefined_speed=False)
 
-        if theta_diff > 100: # and theta_diff_last > 90:
+        # Hysteresis: enter 'aligining' at a large error (100 degrees) but only leave
+        # it once the correction is essentially complete (20 degrees), rather than
+        # using the same threshold both ways. A single symmetric threshold let the
+        # heading hover right around 100 degrees indefinitely -- 'work' mode's
+        # position/velocity-dominated cost has no strong incentive to finish the last
+        # ~20 degrees of rotation once just under the entry threshold, so theta_diff
+        # drifted back and forth across 100 every couple of ticks without ever
+        # settling, and the turn never actually completed.
+        aligning_exit_theta = 20
+        if self._mode == 'aligning':
+            if theta_diff < aligning_exit_theta:
+                self.set_work_mode(mode='work', use_predefined_speed=False)
+        elif theta_diff > 100: # and theta_diff_last > 90:
             self.set_work_mode(mode='aligning')
         else:
             self.set_work_mode(mode='work', use_predefined_speed=False)
