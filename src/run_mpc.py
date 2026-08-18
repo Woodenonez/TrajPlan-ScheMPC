@@ -206,7 +206,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                 actual_timetable[rid][-1] = (kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node))
 
             ### Real run
-            if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
+            if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3) or controller._mode == 'aligning':
                 if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.8) or planner.idle:
                     robot.step(actions[-1])
             robot_manager.set_pred_states(rid, np.asarray(pred_states))
