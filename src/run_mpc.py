@@ -206,7 +206,12 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                 actual_timetable[rid][-1] = (kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node))
 
             ### Real run
-            if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3):
+            # This "arrived, stop stepping" guard only looks at position, so a robot
+            # doing an in-place 180 turn (position barely moves, only heading does)
+            # reads as already arrived and robot.step is skipped forever -- freezing
+            # the heading along with it. The controller marks that case 'aligning',
+            # so force the step through in that mode regardless of position distance.
+            if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3) or controller._mode == 'aligning':
                 if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.8) or planner.idle:
                     robot.step(actions[-1])
             robot_manager.set_pred_states(rid, np.asarray(pred_states))
