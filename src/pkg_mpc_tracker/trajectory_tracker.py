@@ -482,18 +482,15 @@ class TrajectoryTracker:
         finish_state = ref_states[-1,:]
         current_refs = ref_states.reshape(-1).tolist()
 
-        ### Get reference velocities ###
-        dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
-        if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing and (not ignore_speed_ref):
-            speed_ref = dist_to_goal / self.N_hor / self.ts * 2
-            speed_ref = min(speed_ref, self.robot_spec.lin_vel_max)
-            speed_ref_list = [speed_ref]*self.N_hor
-        else:
-            speed_ref_list = [self.base_speed]*self.N_hor
-
-        last_u = self.past_actions[-1] if len(self.past_actions) else np.zeros(self.nu)
-
         ### Complementary restrictions for velocity and angular velocity ###
+        # This must run *before* "Get reference velocities" below: it is the only
+        # place that can switch into 'aligning' mode (which zeroes base_speed so a
+        # large heading correction isn't fought by a forward-speed reference), and
+        # speed_ref_list reads self.base_speed. Deciding the mode after computing
+        # speed_ref_list meant aligning's base_speed change always arrived one tick
+        # too late to affect the solve it was decided for -- and since set_ref_states
+        # unconditionally resets the mode to 'work' at the start of every tick, it
+        # never got read at all.
         # speed_decay = 0.0
         current_ref_theta = math.degrees(ref_states[0, 2]) % 360
         current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
@@ -505,11 +502,22 @@ class TrajectoryTracker:
         # elif theta_diff > 60:
         #     speed_decay = min(max(theta_diff/180, 0.0), 1.0)
         #     self.set_work_mode(mode='work', use_predefined_speed=False)
-        
+
         if theta_diff > 100: # and theta_diff_last > 90:
             self.set_work_mode(mode='aligning')
         else:
             self.set_work_mode(mode='work', use_predefined_speed=False)
+
+        ### Get reference velocities ###
+        dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
+        if (dist_to_goal < self.base_speed*self.N_hor*self.ts) and self.finishing and (not ignore_speed_ref):
+            speed_ref = dist_to_goal / self.N_hor / self.ts * 2
+            speed_ref = min(speed_ref, self.robot_spec.lin_vel_max)
+            speed_ref_list = [speed_ref]*self.N_hor
+        else:
+            speed_ref_list = [self.base_speed]*self.N_hor
+
+        last_u = self.past_actions[-1] if len(self.past_actions) else np.zeros(self.nu)
 
         ### Check if turning around ###
         mid_idx = 0
