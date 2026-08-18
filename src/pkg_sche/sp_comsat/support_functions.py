@@ -63,7 +63,7 @@ def make_graph(nodes,edges):
     }
     return graph
 
-def print_graph(nodes,edges):
+def print_graph(nodes,edges,labels=False):
     nodes_dict = {
         i: {
             'pos': [j['x'],j['y']],
@@ -81,7 +81,7 @@ def print_graph(nodes,edges):
     for i in edges:
         G.add_edge(i.split(',')[0],i.split(',')[1])
 
-    nx.draw(G,nx.get_node_attributes(G,'pos'), with_labels=True)
+    nx.draw(G,nx.get_node_attributes(G,'pos'), with_labels=labels)
     plt.show()
 
 def json_parser(file_to_parse,monolithic = False):
