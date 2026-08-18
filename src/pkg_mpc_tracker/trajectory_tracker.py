@@ -383,7 +383,10 @@ class TrajectoryTracker:
         self.ref_states = ref_states
         if ref_speed is not None:
             self.base_speed = ref_speed
-        else:
+        elif self._mode != 'aligning':
+            # Only default to 'work' here when a heading correction isn't already in
+            # progress -- unconditionally resetting to 'work' every tick discarded an
+            # in-progress 'aligining' decision before it could ever accumulate.
             self.set_work_mode(mode='work', use_predefined_speed=True)
 
     def check_termination_condition(self, external_check=True) -> bool:
@@ -507,7 +510,15 @@ class TrajectoryTracker:
         #     speed_decay = min(max(theta_diff/180, 0.0), 1.0)
         #     self.set_work_mode(mode='work', use_predefined_speed=False)
 
-        if theta_diff > 100: # and theta_diff_last > 90:
+        # Hysteresis: enter 'aligining' at a large error (100 degrees) but only leave
+        # it once the correction is essentially complete (20 degrees) -- a single
+        # symmetric threshold let the heading hover right around 100 degrees
+        # indefinitely instead of ever finishing the turn.
+        aligning_exit_theta = 20
+        if self._mode == 'aligning':
+            if theta_diff < aligning_exit_theta:
+                self.set_work_mode(mode='work', use_predefined_speed=False)
+        elif theta_diff > 100:  # and theta_diff_last > 90:
             self.set_work_mode(mode='aligning')
         else:
             self.set_work_mode(mode='work', use_predefined_speed=False)
