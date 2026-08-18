@@ -13,19 +13,52 @@ step is needed):
   start/goal ids map straight onto node labels.
 
 * **movingai** (e.g. `empty-16-16`, `den312d`, ...): a MovingAI `.map` grid plus `.scen` scenario
-  files. There is no roadmap here to reuse, so this script builds one: one graph node per free
-  cell, edges to orthogonal (and optionally diagonal, corner-cutting excluded) free neighbours.
-  MovingAI stores y counting *downwards* from the map's top row; that is flipped here so the
-  emitted (x, y) reads right-side up under this project's plotting convention (y up), unlike
-  AOC-CBS's own `movingai.py`, which deliberately keeps MovingAI's orientation and flips only at
-  drawing time. Node labels are `"{x}_{y}"` in the flipped frame.
+  files. There is no roadmap here to reuse, so this script builds one. `--method sampled`
+  (the default) reuses AOC-CBS's own roadmap construction verbatim --
+  `aoccbs.models.model1.roadmap.sample_roadmap_from_grid`, called directly on the map's
+  blocked-cell mask rather than through `benchmarking.movingai.map_to_sampled_roadmap` so nothing
+  is written into AOC-CBS's model library -- which is the dart-throwing + Voronoi-backbone +
+  stretch-shortcut sampling method documented in that module and in the appendix of the AOC-CBS
+  paper: points are placed by Poisson-disc dart throwing at a target density, joined along an
+  obstacle-aware Voronoi backbone, then given shortcut edges wherever the backbone detours far
+  around a straight line. Since a sampled vertex bears no relation to any grid cell, the
+  scenario's (start, goal) cells are matched to their nearest sampled vertex instead of reused
+  verbatim, skipping any pair whose start or goal vertex collides with one already claimed by an
+  earlier agent. `--method grid` keeps the previous one-node-per-free-cell behaviour (edges to
+  orthogonal, and optionally diagonal corner-cutting-excluded, free neighbours), for when an
+  exact grid graph is wanted instead. Both methods flip MovingAI's y (which counts *downwards*
+  from the map's top row) so the emitted (x, y) reads right-side up under this project's plotting
+  convention (y up), unlike AOC-CBS's own modules, which deliberately keep MovingAI's orientation
+  and flip only at drawing time. The grid method's node labels are `"{x}_{y}"` in the flipped
+  frame; the sampled method keeps the roadmap's own `"v<i>"` labels.
 
 Both converters emit the same test_case shape as `data/test_cases/4SmallNu.json`: one job per
 robot (`location` = goal, empty `precedence`/`TW`, `Service` 0, single-candidate `ATR`).
 `Big_number`/`Autonomy`/`charging_coefficient` are set generously high so battery constraints
-never bind (these instances have no notion of recharging); `Environment` is left `null` because
-none of these benchmarks ships a matching obstacle map for the MPC layer -- run the generated
-test cases with `controller=False` (scheduler only). `hub_nodes` is left empty.
+never bind (these instances have no notion of recharging). `hub_nodes` is left empty.
+
+`ccbs_roadmaps` ships no obstacle geometry at all, so its `Environment` is left `null` -- run
+those test cases with `controller=False` (scheduler only). `movingai` does have a grid to build
+one from, so its converter also writes `data/schedule_demo2_data/<out>/{map.json,graph.json}` --
+this project's MPC obstacle map and roadmap format (see `src/run_mpc.py` and
+`src/basic_map/map_geometric.py`/`graph.py`) -- and points the test case's `Environment` at it, so
+`controller=True` works out of the box. `map.json`'s obstacles are a greedy tiling of the map's
+blocked cells into axis-aligned rectangles (`_merge_blocked_rectangles`; not minimal, but far
+fewer than one per cell for MovingAI's wall-like obstacle regions); `graph.json` mirrors the test
+case's own node graph exactly, since `GlobalPathCoordinator.get_node_id` looks a scheduled node up
+by exact coordinate match against it. Pass `--no-environment` to skip this and leave `Environment`
+`null`, as before.
+
+**Corridor width vs. robot footprint.** A MovingAI cell is a 1x1 unit square, but this project's
+default `robot_spec.yaml` inflates every obstacle outward by `vehicle_width + vehicle_margin` =
+0.7 units (see `pkg_motion_plan/global_path_coordinate.py:inflate_map`). A single-cell-wide
+corridor -- one free cell between two blocked ones, common in `maze-*`/`room-*`/`den*` -- is only
+1 unit wide wall-to-wall, so it closes completely after inflation (`2*0.7 > 1`); MovingAI's own
+agent convention (radius ~=0.354) does not have this problem, but this project's default robot
+does. `--cell-size` (default 1.0) scales every coordinate, nodes and obstacles alike, before
+writing, so `--cell-size 3` (say) widens every corridor to 3 units without touching
+`robot_spec.yaml`; pick something the fleet can actually pass through, or lower
+`vehicle_width`/`vehicle_margin` instead.
 
 Usage (from the project root):
 
@@ -34,7 +67,9 @@ Usage (from the project root):
 
     python src/roadmap_to_testcase.py movingai-list
     python src/roadmap_to_testcase.py movingai --map empty-16-16 --scenario empty-16-16-random-1 \\
-        --n-agents 8 --connectedness 4 --out movingai_empty16_1_8
+        --n-agents 8 --cell-size 3 --out movingai_empty16_1_8
+    python src/roadmap_to_testcase.py movingai --map empty-16-16 --scenario empty-16-16-random-1 \\
+        --n-agents 8 --method grid --connectedness 4 --no-environment --out movingai_empty16_1_8_grid
 
 Both subcommands write to `data/test_cases/<out>.json`, ready for
 `general_funct(problem="<out>", scheduler_backend="occbs")` (or `"aoccbs"`).
@@ -45,10 +80,14 @@ import json
 import pathlib
 import xml.etree.ElementTree as ET
 
+import numpy as np
+from scipy.spatial import cKDTree
+
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 CCBS_ROADMAPS_DIR = PROJECT_ROOT / "external" / "AOC-CBS" / "data" / "external" / "ccbs_roadmaps"
 MOVINGAI_DIR = PROJECT_ROOT / "external" / "AOC-CBS" / "data" / "external" / "movingai"
 TEST_CASES_DIR = PROJECT_ROOT / "data" / "test_cases"
+SCHEDULE_DATA_DIR = PROJECT_ROOT / "data" / "schedule_demo2_data"
 
 _GRAPHML_NS = "{http://graphml.graphdrawing.org/xmlns}"
 
@@ -59,7 +98,7 @@ DEFAULT_AUTONOMY = 100000
 DEFAULT_CHARGING_COEFFICIENT = 1
 
 
-def _build_test_case(nodes: dict, start_goal_pairs: list, n_agents: int) -> dict:
+def _build_test_case(nodes: dict, start_goal_pairs: list, n_agents: int, environment=None) -> dict:
     if n_agents > len(start_goal_pairs):
         raise ValueError(
             f"requested {n_agents} agents but only {len(start_goal_pairs)} start/goal pairs are available")
@@ -83,7 +122,7 @@ def _build_test_case(nodes: dict, start_goal_pairs: list, n_agents: int) -> dict
             "Big_number": DEFAULT_BIG_NUMBER,
             "Autonomy": DEFAULT_AUTONOMY,
             "charging_coefficient": DEFAULT_CHARGING_COEFFICIENT,
-            "Environment": None,
+            "Environment": environment,
             "nodes": nodes,
             "hub_nodes": [],
         },
@@ -99,6 +138,10 @@ def _write(out_name: str, test_case: dict) -> pathlib.Path:
     n_nodes = len(test_case["test_data"]["nodes"])
     n_robots = len(test_case["ATRs"])
     print(f"wrote {out_path} ({n_nodes} nodes, {n_robots} robots)")
+    environment = test_case["test_data"]["Environment"]
+    if environment:
+        print(f"  MPC environment: data/schedule_demo2_data/{environment}/ "
+              f"(controller=True is ready to use)")
     return out_path
 
 
@@ -242,6 +285,170 @@ def _parse_movingai_scenario(scen_path: pathlib.Path, height: int) -> list:
     return pairs
 
 
+def _parse_movingai_scenario_cells(scen_path: pathlib.Path, height: int) -> list:
+    """Each pair's raw (start, goal) cells as (x, y) in the flipped, right-side-up frame --
+    the coordinate space `_sample_movingai_roadmap`'s node positions are in, so the two can be
+    matched by nearest neighbour."""
+    pairs = []
+    with open(scen_path) as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) != 9:
+                continue
+            sx, sy, gx, gy = (int(v) for v in parts[4:8])
+            pairs.append(((sx, height - 1 - sy), (gx, height - 1 - gy)))
+    return pairs
+
+
+def _sample_movingai_roadmap(map_path: pathlib.Path, density: float, clearance: float,
+                              stretch: float, max_edge_length, speed: float, seed) -> tuple:
+    """Sample a roadmap over the map's free space with AOC-CBS's own construction -- dart
+    throwing at `density`, an obstacle-aware Voronoi backbone, then stretch-triggered shortcuts
+    -- described in `aoccbs.models.model1.roadmap` and in the appendix of the AOC-CBS paper.
+
+    Calls `sample_roadmap_from_grid` directly (rather than going through
+    `aoccbs.benchmarking.movingai.map_to_sampled_roadmap`) so nothing is written into AOC-CBS's
+    own model library; the roadmap is consumed here and discarded.
+    """
+    from aoccbs.benchmarking.movingai import load_grid
+    from aoccbs.models.model1.roadmap import sample_roadmap_from_grid
+
+    blocked = load_grid(map_path)  # [y, x], y counting downwards from the map's top row
+    height = blocked.shape[0]
+    state_graph = sample_roadmap_from_grid(
+        blocked, density=density, clearance=clearance, stretch=stretch,
+        max_edge_length=max_edge_length, speed=speed, seed=seed,
+    )
+
+    nodes = {}
+    for label, data in state_graph.graph.nodes(data=True):
+        x, y = data["pos"]
+        nodes[label] = {"x": float(x), "y": float(height - 1 - y), "next": []}
+    for u, v in state_graph.graph.edges():
+        nodes[u]["next"].append(v)
+
+    return nodes, height
+
+
+def _match_scenario_to_roadmap(scen_cells: list, nodes: dict, n_agents: int) -> list:
+    """Match a scenario's (start, goal) grid cells to their nearest sampled roadmap vertex.
+
+    A sampled vertex bears no relation to any grid cell, so this is the simplest way to reuse an
+    existing MovingAI scenario's start/goal cells on a roadmap sampled over the same map. Pairs
+    are kept in scenario order and stop once `n_agents` are collected; a pair is skipped outright
+    if its start and goal map to the same vertex, or if either vertex was already claimed by an
+    earlier pair, so no two agents share a start or a goal.
+    """
+    labels = list(nodes)
+    positions = np.array([[nodes[label]["x"], nodes[label]["y"]] for label in labels])
+    tree = cKDTree(positions)
+
+    used = set()
+    pairs = []
+    for start_cell, goal_cell in scen_cells:
+        start_label = labels[tree.query(start_cell)[1]]
+        goal_label = labels[tree.query(goal_cell)[1]]
+        if start_label == goal_label or start_label in used or goal_label in used:
+            continue
+        used.add(start_label)
+        used.add(goal_label)
+        pairs.append((start_label, goal_label))
+        if len(pairs) == n_agents:
+            break
+    return pairs
+
+
+def _merge_blocked_rectangles(blocked) -> list:
+    """Greedy tiling of the blocked cells into axis-aligned rectangles.
+
+    Not the true minimum rectangle count, but far fewer than one per cell for the wall-like
+    obstacle regions typical of MovingAI maps, which is what keeps `map.json` a manageable size
+    for the MPC layer to inflate and check against. Scans row-major; each new rectangle grows
+    first rightwards while the row stays blocked and uncovered, then downwards while the whole
+    width stays blocked and uncovered.
+
+    args:
+        blocked: boolean mask indexed [y, x], True where blocked (as `aoccbs...load_grid` returns).
+
+    returns:
+        list of (x0, y0, x1, y1): half-open cell-index bounds in the raw MovingAI frame
+        (row 0 = top row), i.e. covering cells x in [x0, x1) and y in [y0, y1).
+    """
+    height, width = blocked.shape
+    covered = np.zeros_like(blocked)
+    rects = []
+    for y in range(height):
+        x = 0
+        while x < width:
+            if blocked[y, x] and not covered[y, x]:
+                w = 1
+                while x + w < width and blocked[y, x + w] and not covered[y, x + w]:
+                    w += 1
+                h = 1
+                while (y + h < height
+                       and np.all(blocked[y + h, x:x + w])
+                       and not np.any(covered[y + h, x:x + w])):
+                    h += 1
+                covered[y:y + h, x:x + w] = True
+                rects.append((x, y, x + w, y + h))
+                x += w
+            else:
+                x += 1
+    return rects
+
+
+def _rect_to_polygon(rect: tuple, height: int, cell_size: float) -> list:
+    """A blocked-cell rectangle's corners in this module's flipped, right-side-up,
+    cell-size-scaled frame -- the same frame `_parse_movingai_map`'s node positions are in.
+
+    Each cell is the unit square centred on its integer coordinate, so the polygon spans half a
+    cell beyond the rectangle's cell-index bounds on every side; a 1x1 rectangle at raw cell
+    (x0, y0) is therefore centred on (x0, height-1-y0), matching `_movingai_node_label`'s flip.
+    """
+    x0, y0, x1, y1 = rect
+    x_lo, x_hi = (x0 - 0.5) * cell_size, (x1 - 0.5) * cell_size
+    yf_lo, yf_hi = (height - 0.5 - y1) * cell_size, (height - 0.5 - y0) * cell_size
+    return [[x_lo, yf_lo], [x_hi, yf_lo], [x_hi, yf_hi], [x_lo, yf_hi]]
+
+
+def _map_boundary(height: int, width: int, cell_size: float) -> list:
+    """The full map extent in the flipped frame -- symmetric under the flip, so no separate
+    case is needed for which edge ends up on which side."""
+    x_lo, x_hi = -0.5 * cell_size, (width - 0.5) * cell_size
+    y_lo, y_hi = -0.5 * cell_size, (height - 0.5) * cell_size
+    return [[x_lo, y_lo], [x_hi, y_lo], [x_hi, y_hi], [x_lo, y_hi]]
+
+
+def _write_movingai_environment(env_name: str, blocked, nodes: dict, cell_size: float) -> None:
+    """Write `data/schedule_demo2_data/<env_name>/{map.json,graph.json}`, this project's MPC
+    obstacle map and roadmap format, from a MovingAI blocked-cell grid and this test case's own
+    node graph. `nodes` must already be scaled by `cell_size` (the same scale is applied here to
+    the obstacle geometry, since the two have to agree).
+
+    `graph.json` mirrors `nodes` exactly -- same labels, same coordinates -- since
+    `GlobalPathCoordinator.get_node_id` (src/pkg_motion_plan/global_path_coordinate.py) looks a
+    scheduled node up by exact coordinate match against it.
+    """
+    height = blocked.shape[0]
+    map_data = {
+        "boundary_coords": _map_boundary(height, blocked.shape[1], cell_size),
+        "obstacle_list": [
+            _rect_to_polygon(rect, height, cell_size)
+            for rect in _merge_blocked_rectangles(blocked)
+        ],
+    }
+    node_dict = {label: [d["x"], d["y"]] for label, d in nodes.items()}
+    edges = sorted({tuple(sorted((label, nxt))) for label, d in nodes.items() for nxt in d["next"]})
+    graph_data = {"node_dict": node_dict, "edge_list": [list(e) for e in edges]}
+
+    env_dir = SCHEDULE_DATA_DIR / env_name
+    env_dir.mkdir(parents=True, exist_ok=True)
+    with open(env_dir / "map.json", "w") as f:
+        json.dump(map_data, f, indent=4)
+    with open(env_dir / "graph.json", "w") as f:
+        json.dump(graph_data, f, indent=4)
+
+
 def _movingai_map_dir(map_name: str) -> pathlib.Path:
     map_dir = MOVINGAI_DIR / map_name
     if not map_dir.is_dir():
@@ -266,16 +473,41 @@ def _movingai_scenario_path(map_dir: pathlib.Path, scenario) -> pathlib.Path:
     return map_dir / "scenarios" / scenario
 
 
-def convert_movingai(map_name: str, scenario, n_agents: int, out_name: str, connectedness: int = 4) -> pathlib.Path:
+def convert_movingai(map_name: str, scenario, n_agents: int, out_name: str, method: str = "sampled",
+                      connectedness: int = 4, density: float = 0.02, clearance=None,
+                      stretch: float = 1.5, max_edge_length=None, speed: float = 1.0,
+                      seed=None, environment: bool = True, cell_size: float = 1.0) -> pathlib.Path:
     map_dir = _movingai_map_dir(map_name)
     map_path = _movingai_map_file(map_dir)
     scen_path = _movingai_scenario_path(map_dir, scenario)
     if not scen_path.is_file():
         raise FileNotFoundError(f"no such scenario file: {scen_path}")
 
-    nodes, height = _parse_movingai_map(map_path, connectedness)
-    pairs = _parse_movingai_scenario(scen_path, height)
-    test_case = _build_test_case(nodes, pairs, n_agents)
+    if method == "grid":
+        nodes, height = _parse_movingai_map(map_path, connectedness)
+        pairs = _parse_movingai_scenario(scen_path, height)
+    elif method == "sampled":
+        if clearance is None:
+            from aoccbs.models.model1.roadmap import DEFAULT_CLEARANCE
+            clearance = DEFAULT_CLEARANCE
+        nodes, height = _sample_movingai_roadmap(
+            map_path, density, clearance, stretch, max_edge_length, speed, seed)
+        pairs = _match_scenario_to_roadmap(
+            _parse_movingai_scenario_cells(scen_path, height), nodes, n_agents)
+    else:
+        raise ValueError(f"unknown method {method!r}, expected 'sampled' or 'grid'")
+
+    if cell_size != 1.0:
+        nodes = {label: {**d, "x": d["x"] * cell_size, "y": d["y"] * cell_size}
+                 for label, d in nodes.items()}
+
+    env_name = None
+    if environment:
+        from aoccbs.benchmarking.movingai import load_grid
+        env_name = out_name
+        _write_movingai_environment(env_name, load_grid(map_path), nodes, cell_size)
+
+    test_case = _build_test_case(nodes, pairs, n_agents, environment=env_name)
     return _write(out_name, test_case)
 
 
@@ -320,8 +552,31 @@ def main() -> None:
     p_mai.add_argument("--map", required=True, dest="map_name", help="map folder name, e.g. empty-16-16")
     p_mai.add_argument("--scenario", required=True, help="scenario file stem, e.g. empty-16-16-random-1")
     p_mai.add_argument("--n-agents", type=int, required=True)
-    p_mai.add_argument("--connectedness", type=int, choices=[4, 8], default=4)
     p_mai.add_argument("--out", required=True, help="output test case name (no .json)")
+    p_mai.add_argument("--method", choices=["sampled", "grid"], default="sampled",
+                        help="'sampled' (default): AOC-CBS's dart-throwing + Voronoi-backbone "
+                             "roadmap sampling, per the appendix of the AOC-CBS paper. "
+                             "'grid': one node per free cell.")
+    p_mai.add_argument("--connectedness", type=int, choices=[4, 8], default=4,
+                        help="--method grid only")
+    p_mai.add_argument("--density", type=float, default=0.02,
+                        help="--method sampled only: roadmap vertices per unit area")
+    p_mai.add_argument("--clearance", type=float, default=None,
+                        help="--method sampled only: clearance kept from obstacles; "
+                             "defaults to AOC-CBS's standard circular agent radius")
+    p_mai.add_argument("--stretch", type=float, default=1.5, help="--method sampled only")
+    p_mai.add_argument("--max-edge-length", type=float, default=None,
+                        dest="max_edge_length", help="--method sampled only")
+    p_mai.add_argument("--speed", type=float, default=1.0, help="--method sampled only")
+    p_mai.add_argument("--seed", type=int, default=None, help="--method sampled only")
+    p_mai.add_argument("--no-environment", dest="environment", action="store_false",
+                        help="skip writing an MPC obstacle map/graph under "
+                             "data/schedule_demo2_data/<out>/ and leave test_data.Environment "
+                             "null (scheduler-only test case)")
+    p_mai.add_argument("--cell-size", type=float, default=1.0,
+                        help="scale factor applied to every coordinate (nodes and obstacles) "
+                             "before writing; see the module docstring's note on corridor width "
+                             "vs. robot footprint")
 
     sub.add_parser("movingai-list", help="list available movingai maps/scenario files")
 
@@ -332,7 +587,11 @@ def main() -> None:
     elif args.command == "ccbs-list":
         print_ccbs_catalog()
     elif args.command == "movingai":
-        convert_movingai(args.map_name, args.scenario, args.n_agents, args.out, args.connectedness)
+        convert_movingai(
+            args.map_name, args.scenario, args.n_agents, args.out, method=args.method,
+            connectedness=args.connectedness, density=args.density, clearance=args.clearance,
+            stretch=args.stretch, max_edge_length=args.max_edge_length, speed=args.speed,
+            seed=args.seed, environment=args.environment, cell_size=args.cell_size)
     elif args.command == "movingai-list":
         print_movingai_catalog()
 
