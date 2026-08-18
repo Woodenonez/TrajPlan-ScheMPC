@@ -60,8 +60,8 @@ if __name__ == "__main__":
     # problem = '4SmallNu' # 4Small's graph, one destination per robot (single-goal MAPF)
     # problem = "10Large"
     # problem = 'ccbs_dense_1_10'
-    problem = 'movingai_empty16_1_8'
-    # problem = 'mz_r_1_4_2_sample'
+    # problem = 'movingai_empty16_1_8'
+    problem = 'mz_r_1_4_2_sample'
     general_funct(
         problem,
         scheduler = True,

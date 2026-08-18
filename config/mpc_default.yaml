@@ -6,7 +6,7 @@
 ts: 0.2   # Size of the time-step (sampling time)
 
 ### MPC configuration
-N_hor: 20        # The length of the receding horizon controller
+N_hor: 30        # The length of the receding horizon controller
 action_steps: 1  # How many steps should be taken from each mpc-solution. Range (1 - N_hor)
 # Helper variables (Generally does not have to be changed)
 nu: 2     # Number of control inputs (speed and angular speed)
