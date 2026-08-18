@@ -30,7 +30,7 @@ if __name__ == "__main__":
     # need distinct optimizer names to land in separate `mpc_solver/<name>/` directories --
     # see `configs.panoc_light_optimizer_name`. This must match `mpc_backend` at run time
     # (run_mpc.py's `MPC_BACKENDS`), and `cfg_fname` here must match run_mpc.py's `CFG_FNAME`.
-    panoc_builder = "panoc_light"  # "panoc" or "panoc_light"
+    panoc_builder = "panoc"  # "panoc" or "panoc_light"
 
     config_mpc = load_mpc_config(cfg_fname)
     config_robot = load_robot_spec(robot_spec)
