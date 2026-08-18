@@ -297,7 +297,13 @@ class TrajectoryTracker:
         self._mode = mode
         if mode == 'aligning':
             if use_predefined_speed:
-                self.base_speed = self.robot_spec.lin_vel_max*0.5
+                # A non-zero forward-speed reference here directly fights the heading
+                # correction: this robot can barely reverse (lin_vel_min is ~0), so
+                # asking it to rotate ~180 degrees while also tracking a real forward
+                # speed is only satisfiable by moving in the *old* heading, which is
+                # exactly the opposite of what aligning mode is supposed to achieve.
+                # Hold still and turn in place instead.
+                self.base_speed = 0.0
             self.tuning_params = [self.config.qpos, self.config.qvel, self.config.qtheta, self.config.lin_vel_penalty, self.config.ang_vel_penalty,
                                   self.config.qpN, self.config.qthetaN, self.config.qrpd, self.config.lin_acc_penalty, self.config.ang_acc_penalty]
             self.tuning_params = [x*0.1 for x in self.tuning_params]
