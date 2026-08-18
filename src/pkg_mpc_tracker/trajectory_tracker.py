@@ -497,10 +497,9 @@ class TrajectoryTracker:
         current_theta = math.degrees(self.state[2]) % 360
         theta_diff = float(self.angle_diff(current_ref_theta, current_theta))
         theta_diff_last = float(self.angle_diff(current_ref_theta_last, current_theta))
-        if self.vb:
-            print(f"[AligningDebug-{self.robot_id}] pos=({self.state[0]:.4f},{self.state[1]:.4f}) "
-                  f"current_theta={current_theta:.2f} current_ref_theta={current_ref_theta:.2f} "
-                  f"theta_diff={theta_diff:.2f}")
+        print(f"[AligningDebug-{self.robot_id}] pos=({self.state[0]:.4f},{self.state[1]:.4f}) "
+              f"current_theta={current_theta:.2f} current_ref_theta={current_ref_theta:.2f} "
+              f"theta_diff={theta_diff:.2f}")
         # if (theta_diff := (abs(current_ref_theta - current_theta) % 180)) > 120:
         #     self.set_work_mode(mode='aligning')
         # elif theta_diff > 60:
