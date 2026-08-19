@@ -37,17 +37,22 @@ robot (`location` = goal, empty `precedence`/`TW`, `Service` 0, single-candidate
 `Big_number`/`Autonomy`/`charging_coefficient` are set generously high so battery constraints
 never bind (these instances have no notion of recharging). `hub_nodes` is left empty.
 
-`ccbs_roadmaps` ships no obstacle geometry at all, so its `Environment` is left `null` -- run
-those test cases with `controller=False` (scheduler only). `movingai` does have a grid to build
-one from, so its converter also writes `data/schedule_demo2_data/<out>/{map.json,graph.json}` --
-this project's MPC obstacle map and roadmap format (see `src/run_mpc.py` and
-`src/basic_map/map_geometric.py`/`graph.py`) -- and points the test case's `Environment` at it, so
-`controller=True` works out of the box. `map.json`'s obstacles are a greedy tiling of the map's
-blocked cells into axis-aligned rectangles (`_merge_blocked_rectangles`; not minimal, but far
-fewer than one per cell for MovingAI's wall-like obstacle regions); `graph.json` mirrors the test
-case's own node graph exactly, since `GlobalPathCoordinator.get_node_id` looks a scheduled node up
-by exact coordinate match against it. Pass `--no-environment` to skip this and leave `Environment`
-`null`, as before.
+`ccbs_roadmaps`' `map.xml` carries no obstacle geometry at all -- it is a bare weighted graph over
+continuous coordinates, with no walls to reconstruct -- so its converter can only build a map, not
+recover one: `data/schedule_demo2_data/<out>/map.json` is a rectangular boundary around the
+roadmap's node extent, padded by `--margin` (default 10 units) on every side, with an empty
+`obstacle_list`. That is enough to make `controller=True` runnable (open free space bounded by the
+map extent, so only fleet/inter-robot avoidance is exercised, not static obstacle avoidance); pass
+`--no-environment` to skip writing it and leave `Environment` `null`, as before (scheduler only).
+`movingai` does have a grid to build a real map from, so its converter also writes
+`data/schedule_demo2_data/<out>/{map.json,graph.json}` -- this project's MPC obstacle map and
+roadmap format (see `src/run_mpc.py` and `src/basic_map/map_geometric.py`/`graph.py`) -- and
+points the test case's `Environment` at it, so `controller=True` works out of the box. `map.json`'s
+obstacles are a greedy tiling of the map's blocked cells into axis-aligned rectangles
+(`_merge_blocked_rectangles`; not minimal, but far fewer than one per cell for MovingAI's
+wall-like obstacle regions); `graph.json` mirrors the test case's own node graph exactly, since
+`GlobalPathCoordinator.get_node_id` looks a scheduled node up by exact coordinate match against
+it. Pass `--no-environment` to skip this and leave `Environment` `null`, as before.
 
 **Corridor width vs. robot footprint.** A MovingAI cell is a 1x1 unit square, but this project's
 default `robot_spec.yaml` inflates every obstacle outward by `vehicle_width + vehicle_margin` =
@@ -64,6 +69,8 @@ Usage (from the project root):
 
     python src/roadmap_to_testcase.py ccbs-list
     python src/roadmap_to_testcase.py ccbs --density dense --task 1 --n-agents 10 --out ccbs_dense_1_10
+    python src/roadmap_to_testcase.py ccbs --density sparse --task 1 --n-agents 4 --out ccbs_sparse_1_4 \\
+        --no-environment  # scheduler-only, as before -- no boundary/map written
 
     python src/roadmap_to_testcase.py movingai-list
     python src/roadmap_to_testcase.py movingai --map empty-16-16 --scenario empty-16-16-random-1 \\
@@ -131,6 +138,26 @@ def _build_test_case(nodes: dict, start_goal_pairs: list, n_agents: int, environ
     }
 
 
+def _write_environment_files(env_name: str, nodes: dict, map_data: dict) -> None:
+    """Write `data/schedule_demo2_data/<env_name>/{map.json,graph.json}`, this project's MPC
+    obstacle map and roadmap format (see `src/run_mpc.py` and
+    `src/basic_map/map_geometric.py`/`graph.py`). `graph.json` mirrors `nodes` exactly -- same
+    labels, same coordinates -- since `GlobalPathCoordinator.get_node_id`
+    (src/pkg_motion_plan/global_path_coordinate.py) looks a scheduled node up by exact coordinate
+    match against it.
+    """
+    node_dict = {label: [d["x"], d["y"]] for label, d in nodes.items()}
+    edges = sorted({tuple(sorted((label, nxt))) for label, d in nodes.items() for nxt in d["next"]})
+    graph_data = {"node_dict": node_dict, "edge_list": [list(e) for e in edges]}
+
+    env_dir = SCHEDULE_DATA_DIR / env_name
+    env_dir.mkdir(parents=True, exist_ok=True)
+    with open(env_dir / "map.json", "w") as f:
+        json.dump(map_data, f, indent=4)
+    with open(env_dir / "graph.json", "w") as f:
+        json.dump(graph_data, f, indent=4)
+
+
 def _write(out_name: str, test_case: dict) -> pathlib.Path:
     out_path = TEST_CASES_DIR / f"{out_name}.json"
     with open(out_path, "w") as f:
@@ -177,7 +204,28 @@ def _ccbs_task_path(density_dir: pathlib.Path, task) -> pathlib.Path:
     return density_dir / f"{task}_task.xml"
 
 
-def convert_ccbs_roadmap(density: str, task, n_agents: int, out_name: str) -> pathlib.Path:
+def _write_ccbs_environment(env_name: str, nodes: dict, margin: float) -> None:
+    """Build the MPC map for a ccbs_roadmaps instance. Unlike MovingAI, `map.xml` gives no
+    obstacle geometry to reconstruct from -- just a weighted graph over continuous coordinates --
+    so the only map available is a rectangular boundary around the roadmap's own node extent,
+    padded by `margin` on every side, with an empty `obstacle_list`. `margin` must comfortably
+    exceed `robot_spec.yaml`'s default inflation (`vehicle_width + vehicle_margin` = 0.7), which
+    shrinks the boundary inward (`GlobalPathCoordinator.inflate_map`), or the inflated map could
+    clip nodes near the edge.
+    """
+    xs = [d["x"] for d in nodes.values()]
+    ys = [d["y"] for d in nodes.values()]
+    x_lo, x_hi = min(xs) - margin, max(xs) + margin
+    y_lo, y_hi = min(ys) - margin, max(ys) + margin
+    map_data = {
+        "boundary_coords": [[x_lo, y_lo], [x_hi, y_lo], [x_hi, y_hi], [x_lo, y_hi]],
+        "obstacle_list": [],
+    }
+    _write_environment_files(env_name, nodes, map_data)
+
+
+def convert_ccbs_roadmap(density: str, task, n_agents: int, out_name: str,
+                          environment: bool = True, margin: float = 10.0) -> pathlib.Path:
     density_dir = CCBS_ROADMAPS_DIR / density
     map_path = density_dir / "map.xml"
     task_path = _ccbs_task_path(density_dir, task)
@@ -188,7 +236,11 @@ def convert_ccbs_roadmap(density: str, task, n_agents: int, out_name: str) -> pa
 
     nodes = _parse_ccbs_map(map_path)
     pairs = _parse_ccbs_task(task_path)
-    test_case = _build_test_case(nodes, pairs, n_agents)
+    env_name = None
+    if environment:
+        env_name = out_name
+        _write_ccbs_environment(env_name, nodes, margin)
+    test_case = _build_test_case(nodes, pairs, n_agents, environment=env_name)
     return _write(out_name, test_case)
 
 
@@ -420,14 +472,10 @@ def _map_boundary(height: int, width: int, cell_size: float) -> list:
 
 
 def _write_movingai_environment(env_name: str, blocked, nodes: dict, cell_size: float) -> None:
-    """Write `data/schedule_demo2_data/<env_name>/{map.json,graph.json}`, this project's MPC
-    obstacle map and roadmap format, from a MovingAI blocked-cell grid and this test case's own
-    node graph. `nodes` must already be scaled by `cell_size` (the same scale is applied here to
-    the obstacle geometry, since the two have to agree).
-
-    `graph.json` mirrors `nodes` exactly -- same labels, same coordinates -- since
-    `GlobalPathCoordinator.get_node_id` (src/pkg_motion_plan/global_path_coordinate.py) looks a
-    scheduled node up by exact coordinate match against it.
+    """Build the MPC map for a MovingAI grid: a boundary matching the map extent, and obstacles
+    from a greedy tiling of the grid's blocked cells. `nodes` must already be scaled by
+    `cell_size` (the same scale is applied here to the obstacle geometry, since the two have to
+    agree).
     """
     height = blocked.shape[0]
     map_data = {
@@ -437,16 +485,7 @@ def _write_movingai_environment(env_name: str, blocked, nodes: dict, cell_size: 
             for rect in _merge_blocked_rectangles(blocked)
         ],
     }
-    node_dict = {label: [d["x"], d["y"]] for label, d in nodes.items()}
-    edges = sorted({tuple(sorted((label, nxt))) for label, d in nodes.items() for nxt in d["next"]})
-    graph_data = {"node_dict": node_dict, "edge_list": [list(e) for e in edges]}
-
-    env_dir = SCHEDULE_DATA_DIR / env_name
-    env_dir.mkdir(parents=True, exist_ok=True)
-    with open(env_dir / "map.json", "w") as f:
-        json.dump(map_data, f, indent=4)
-    with open(env_dir / "graph.json", "w") as f:
-        json.dump(graph_data, f, indent=4)
+    _write_environment_files(env_name, nodes, map_data)
 
 
 def _movingai_map_dir(map_name: str) -> pathlib.Path:
@@ -545,6 +584,14 @@ def main() -> None:
     p_ccbs.add_argument("--task", required=True, help="task file stem or number, e.g. 1 or 1_task")
     p_ccbs.add_argument("--n-agents", type=int, required=True)
     p_ccbs.add_argument("--out", required=True, help="output test case name (no .json)")
+    p_ccbs.add_argument("--no-environment", dest="environment", action="store_false",
+                         help="skip writing an MPC map under data/schedule_demo2_data/<out>/ "
+                              "and leave test_data.Environment null (scheduler-only test case, "
+                              "the previous default)")
+    p_ccbs.add_argument("--margin", type=float, default=10.0,
+                         help="--environment only: padding added around the roadmap's node "
+                              "extent on every side to make the map boundary, since map.xml "
+                              "carries no obstacle geometry to build a tighter map from")
 
     sub.add_parser("ccbs-list", help="list available ccbs_roadmaps densities/task files")
 
@@ -583,7 +630,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "ccbs":
-        convert_ccbs_roadmap(args.density, args.task, args.n_agents, args.out)
+        convert_ccbs_roadmap(args.density, args.task, args.n_agents, args.out,
+                              environment=args.environment, margin=args.margin)
     elif args.command == "ccbs-list":
         print_ccbs_catalog()
     elif args.command == "movingai":
