@@ -177,15 +177,31 @@ def _write(out_name: str, test_case: dict) -> pathlib.Path:
 # ---------------------------------------------------------------------------
 
 def _parse_ccbs_map(map_path: pathlib.Path) -> dict:
-    """Node ids and (x, y) are carried over verbatim from the GraphML 'n<k>' labels."""
+    """Node ids and (x, y) are carried over verbatim from the GraphML 'n<k>' labels.
+
+    A handful of ccbs_roadmaps maps (e.g. `sparse`) contain a pair of distinct node ids placed at
+    the exact same coordinates and an edge between them -- a zero-length edge with no well-defined
+    direction. sp_comsat and OC-CBS tolerate it (they never normalise an edge vector), but
+    AOC-CBS's preprocessing divides by edge length to get a direction and produces `NaN` on it,
+    which later crashes as `ValueError: cannot convert float NaN to integer`. Such edges carry no
+    information anyway -- both endpoints are the same point -- so they are dropped here rather
+    than passed through, for every scheduler backend alike.
+    """
     root = ET.parse(map_path).getroot()
     nodes = {}
     for node_elem in root.iter(f"{_GRAPHML_NS}node"):
         label = node_elem.get("id")
         x_str, y_str = node_elem.find(f"{_GRAPHML_NS}data").text.strip().split(",")
         nodes[label] = {"x": float(x_str), "y": float(y_str), "next": []}
+    n_dropped = 0
     for edge_elem in root.iter(f"{_GRAPHML_NS}edge"):
-        nodes[edge_elem.get("source")]["next"].append(edge_elem.get("target"))
+        source, target = edge_elem.get("source"), edge_elem.get("target")
+        if (nodes[source]["x"], nodes[source]["y"]) == (nodes[target]["x"], nodes[target]["y"]):
+            n_dropped += 1
+            continue
+        nodes[source]["next"].append(target)
+    if n_dropped:
+        print(f"  dropped {n_dropped} zero-length edge(s) between coincident nodes in {map_path.name}")
     return nodes
 
 
