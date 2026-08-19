@@ -3,7 +3,7 @@
         "Big_number": 100000,
         "Autonomy": 100000,
         "charging_coefficient": 1,
-        "Environment": null,
+        "Environment": "ccbs_sparse_1_4",
         "nodes": {
             "n0": {
                 "x": 70.0,
