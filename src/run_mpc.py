@@ -146,8 +146,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     main_plotter.plot_in_loop_pre(gpc.current_map, graph_manager=gpc.current_graph)
     color_list = [
         "#0072B2", "#D55E00", "#009E73", "#F0E442", "#56B4E9",
-        "#E69F00", "#CC79A7", "#0072B2", "#D55E00", "#009E73",
-        "#F0E442", "#56B4E9", "#E69F00", "#CC79A7"
+        "#E69F00", "#CC79A7",
     ]
     for i, rid in enumerate(robot_ids):
         planner = robot_manager.get_planner(rid)
@@ -157,7 +156,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                                        None, #planner.ref_traj,
                                        controller.state,
                                        controller.final_goal,
-                                       color=color_list[i])
+                                       color=color_list[i % len(color_list)])
         visualizer.plot(main_plotter.map_ax, *robot.state)
 
     actual_timetable = {rid: [] for rid in robot_ids}

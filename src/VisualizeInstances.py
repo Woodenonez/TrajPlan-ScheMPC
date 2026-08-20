@@ -21,4 +21,4 @@ def visualize_instance(problem,labels):
 
 if __name__ == "__main__":
 
-    visualize_instance('movingai_empty16_1_8',False)
+    visualize_instance('test_6',False)

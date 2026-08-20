@@ -189,7 +189,15 @@ def _build_problem_config(chains: dict, atrs: dict, agent_model: str, state_grap
     return ProblemConfig(agents=agents)
 
 
-def _solve(problem_config: ProblemConfig, solver_config: SolverConfig, verbose: bool = True) -> tuple:
+def _solve(problem_config: ProblemConfig, solver_config: SolverConfig, verbose: bool = True,
+           first_solution_only: bool = False) -> tuple:
+    """`first_solution_only` stops as soon as `solver.best_solution` is set (any feasible joint
+    plan, however far from optimal), rather than running AOC-CBS's normal anytime loop out to its
+    `optimality_gap`/`timelimit` stopping point. There is no such mode in the vendored library
+    itself -- `SolverConfig.optimality_gap` is a *relative* gap against the current lower bound,
+    not reachable in general right after the first solution, so this is implemented as an extra
+    break condition here rather than by tuning that config field.
+    """
     run_config = RunConfig(solver_config=solver_config, problem_config=problem_config)
     solver = AOCCBSSolver(extract_plant_spec(run_config))
     try:
@@ -204,9 +212,16 @@ def _solve(problem_config: ProblemConfig, solver_config: SolverConfig, verbose: 
             if timelimit is not None and time.time() - t0 > timelimit:
                 break
             solver.iterate()
+            if first_solution_only and solver.best_solution is not None:
+                break
 
         if verbose:
-            status = 'optimal' if solver.found_optimal else f'gap {solver.optimality_gap:.3f}'
+            if solver.found_optimal:
+                status = 'optimal'
+            elif first_solution_only and solver.best_solution is not None:
+                status = f'first solution, gap {solver.optimality_gap:.3f}'
+            else:
+                status = f'gap {solver.optimality_gap:.3f}'
             print(f"AOC-CBS: {solver.iterations} iterations, {time.time() - t0:.2f}s, {status}")
 
         if solver.best_solution is None:
@@ -236,12 +251,16 @@ def _extract_schedule(joint_plan, agent_map: dict, state_graph) -> dict:
 
 def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
           solver_overrides: dict = None, workers: int = None, verbose: bool = True,
-          assign_via_routing: bool = False) -> tuple:
+          assign_via_routing: bool = False, first_solution_only: bool = False) -> tuple:
     """Entry point mirroring `OCCBS`/`Compo_slim`: returns (solution, stats).
 
     `assign_via_routing` lifts the usual "every job already pinned to one robot" restriction
     by running sp_comsat's Gurobi routing sub-solver first to decide the assignment -- see
     `_robot_task_specs_via_routing`.
+
+    `first_solution_only` returns as soon as AOC-CBS finds any feasible joint plan instead of
+    running its normal anytime search out to `solver_overrides['optimality_gap']`/`'timelimit'`
+    (defaulted below to 0.0/600s, i.e. run to proven optimality or 10 minutes) -- see `_solve`.
     """
     with open(f"{PROJECT_ROOT}/data/test_cases/{problem}.json") as f:
         data = json.load(f)
@@ -263,7 +282,8 @@ def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
         **(solver_overrides or {}),
     })
 
-    best_solution, stats = _solve(problem_config, solver_config, verbose=verbose)
+    best_solution, stats = _solve(problem_config, solver_config, verbose=verbose,
+                                   first_solution_only=first_solution_only)
 
     state_graph = load_state_graph(sg_id)
     solution = _extract_schedule(best_solution, problem_config.agent_map, state_graph)
