@@ -102,6 +102,9 @@ class GlobalPathCoordinator:
     def load_graph_from_json(self, json_path: str):
         self.load_graph(NetGraph.from_json(json_path))
 
+    def load_graph_from_test_case(self, json_path: str):
+        self.load_graph(NetGraph.from_test_case_json(json_path))
+
     def load_map(self, boundary_coords: list[PathNode], obstacle_list: list[list[PathNode]], rescale:Optional[float]=None, inflation_margin:Optional[float]=None):
         self._current_map = GeometricMap.from_raw(boundary_coords, obstacle_list, rescale=rescale)
         if inflation_margin is not None:

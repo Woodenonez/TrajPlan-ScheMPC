@@ -107,7 +107,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
 
     ### Map, graph, and schedule paths
     map_path = os.path.join(data_dir, f"{EnvFolder}/map.json")
-    graph_path = os.path.join(data_dir, f"{EnvFolder}/graph.json")
+    test_case_path = os.path.join(root_dir, "data", "test_cases", f"{problem}.json")
     schedule_path = os.path.join(data_dir, "schedule.csv")
     start_path = os.path.join(data_dir, "robot_start.json")
     with open(start_path, "r") as f:
@@ -115,7 +115,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
 
     ### Set up the global path/schedule coordinator
     gpc = GlobalPathCoordinator.from_csv(schedule_path)
-    gpc.load_graph_from_json(graph_path)
+    gpc.load_graph_from_test_case(test_case_path)
     gpc.load_map_from_json(map_path, inflation_margin=config_robot.vehicle_width+config_robot.vehicle_margin)
     robot_ids = gpc.robot_ids if robot_ids is None else robot_ids
     boundary_coords = gpc.current_map.boundary_coords
