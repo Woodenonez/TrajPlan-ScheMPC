@@ -248,18 +248,26 @@ class RobotManager():
         state_dim = config_mpc.ns
         horizon = config_mpc.N_hor
         num_others = config_mpc.Nother
-        
+
+        ego_state:np.ndarray = self.get_robot_state(ego_robot_id)
+        other_ids = [id_ for id_ in self._robot_dict if id_ != ego_robot_id]
+        if len(other_ids) > num_others:
+            # More robots than slots: keep the closest `num_others` rather than silently
+            # overrunning the fixed-size blocks below (see `get_stc_constraints` for the same
+            # closest-first pattern applied to static obstacles).
+            other_ids.sort(key=lambda id_: float(np.hypot(*(self.get_robot_state(id_)[:2] - ego_state[:2]))))
+            other_ids = other_ids[:num_others]
+
         other_robot_states = [default] * state_dim * (horizon+1) * num_others
         idx = 0
         idx_pred = state_dim * num_others
-        for id_ in list(self._robot_dict):
-            if id_ != ego_robot_id:
-                current_state:np.ndarray = self.get_robot_state(id_)
-                pred_states:np.ndarray = self.get_pred_states(id_) # every row is a state
-                other_robot_states[idx : idx+state_dim] = list(current_state)
-                idx += state_dim
-                if pred_states is not None:
-                    other_robot_states[idx_pred : idx_pred+state_dim*horizon] = list(pred_states.reshape(-1))
-                    idx_pred += state_dim*horizon
+        for id_ in other_ids:
+            current_state:np.ndarray = self.get_robot_state(id_)
+            pred_states:np.ndarray = self.get_pred_states(id_) # every row is a state
+            other_robot_states[idx : idx+state_dim] = list(current_state)
+            idx += state_dim
+            if pred_states is not None:
+                other_robot_states[idx_pred : idx_pred+state_dim*horizon] = list(pred_states.reshape(-1))
+                idx_pred += state_dim*horizon
         return other_robot_states
     

@@ -10,7 +10,8 @@ data_path = os.path.join(project_root, "data")
 
 
 def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False,
-                  scheduler_backend="sp_comsat", mpc_backend=None, assign_via_routing=False):
+                  scheduler_backend="sp_comsat", mpc_backend=None, assign_via_routing=False,
+                  first_solution_only=False):
     if scheduler:
         if scheduler_backend == "sp_comsat":
             from pkg_sche.sp_comsat.Compo_slim import Compo_slim
@@ -20,7 +21,8 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
             solution, _ = OCCBS(problem)
         elif scheduler_backend == "aoccbs":
             from pkg_sche.aoccbs.runner import AOCCBS
-            solution, _ = AOCCBS(problem, assign_via_routing=assign_via_routing)
+            solution, _ = AOCCBS(problem, assign_via_routing=assign_via_routing,
+                                  first_solution_only=first_solution_only)
         else:
             raise ValueError(f"unknown scheduler_backend {scheduler_backend!r}")
         # save the schedule (I don't actually need this step, but it is more readable than the csv)
@@ -59,20 +61,22 @@ if __name__ == "__main__":
     # problem = '4Small' # SAFETY COEFF 20
     # problem = '4SmallNu' # 4Small's graph, one destination per robot (single-goal MAPF)
     # problem = "10Large"
-    # problem = 'ccbs_dense_1_10'
+    # problem = 'ccbs_sparse_1_4'
     # problem = 'movingai_empty16_1_8'
-    problem = 'mz_r_1_4_2_sample'
+    problem = 'test_5' # why do agents go to a THIRD location?
     general_funct(
         problem,
         scheduler = True,
         controller= True,
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
-        ignore_speed_ref= True,
+        ignore_speed_ref= False,
         recording= False,
-        scheduler_backend= "sp_comsat", # "sp_comsat", "occbs", or "aoccbs"
+        scheduler_backend= "aoccbs", # "sp_comsat", "occbs", or "aoccbs"
         assign_via_routing= False, # aoccbs only: use sp_comsat's Gurobi routing sub-solver to
                               # assign jobs to robots first, instead of requiring every job
                               # pre-pinned to one ATR (see pkg_sche.aoccbs.runner)
+        first_solution_only= False, # aoccbs only: stop at the first feasible joint plan instead
+                              # of running the normal anytime search out to optimality/timelimit
         mpc_backend= "panoc" # "casadi" (IPOPT, no build step); "panoc" or "panoc_light" (both
                               # need build_solver.py, with panoc_builder set to match -- see
                               # build_solver.py); None falls back to solver_type in config/mpc_fast.yaml

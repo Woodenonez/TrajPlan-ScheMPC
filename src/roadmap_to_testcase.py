@@ -83,6 +83,7 @@ Both subcommands write to `data/test_cases/<out>.json`, ready for
 """
 
 import argparse
+import collections
 import json
 import pathlib
 import xml.etree.ElementTree as ET
@@ -158,6 +159,52 @@ def _write_environment_files(env_name: str, nodes: dict, map_data: dict) -> None
         json.dump(graph_data, f, indent=4)
 
 
+def _clear_aoccbs_cache(out_name: str) -> None:
+    """Delete any AOC-CBS state-graph/preprocessing cache for `out_name`.
+
+    `pkg_sche.aoccbs.runner._build_state_graph` names the state graph `TrajPlan_<problem>` and
+    reuses it by that id across runs rather than rebuilding it -- see that module's docstring.
+    Regenerating a test case under the same `--out` name (a different `--density`/`--stride`, a
+    different map, ...) leaves the old cache in place otherwise, and it doesn't always fail loudly:
+    coordinate-based node labels from the old graph can coincidentally still exist in the new one,
+    so `aoccbs` can silently solve the wrong graph instead of raising. Called unconditionally from
+    `_write`, so every (re)generation under a given name starts with a clean slate for it.
+    """
+    try:
+        from aoccbs import paths as aoccbs_paths
+    except ImportError:
+        return  # AOC-CBS isn't installed in this environment -- nothing cached to clear.
+
+    sg_id = f"TrajPlan_{out_name}"
+    removed = []
+
+    try:
+        model_file = aoccbs_paths.state_graph_model_file(sg_id)
+        model_file.unlink()
+        removed.append(model_file)
+    except FileNotFoundError:
+        pass
+
+    try:
+        dist_file = aoccbs_paths.state_graph_distance_file(sg_id)
+        dist_file.unlink()
+        removed.append(dist_file)
+        index_file = dist_file.parent / f"{dist_file.stem}.index.json"
+        if index_file.is_file():
+            index_file.unlink()
+            removed.append(index_file)
+    except FileNotFoundError:
+        pass
+
+    if aoccbs_paths.INTERSECTION_INTERVAL_PP_DIR.is_dir():
+        for path in aoccbs_paths.INTERSECTION_INTERVAL_PP_DIR.glob(f"*{sg_id}*.json"):
+            path.unlink()
+            removed.append(path)
+
+    if removed:
+        print(f"  cleared {len(removed)} stale AOC-CBS cache file(s) for {sg_id}")
+
+
 def _write(out_name: str, test_case: dict) -> pathlib.Path:
     out_path = TEST_CASES_DIR / f"{out_name}.json"
     with open(out_path, "w") as f:
@@ -169,6 +216,7 @@ def _write(out_name: str, test_case: dict) -> pathlib.Path:
     if environment:
         print(f"  MPC environment: data/schedule_demo2_data/{environment}/ "
               f"(controller=True is ready to use)")
+    _clear_aoccbs_cache(out_name)
     return out_path
 
 
@@ -306,10 +354,290 @@ def _movingai_node_label(x: int, y_flipped: int) -> str:
     return f"{x}_{y_flipped}"
 
 
-def _parse_movingai_map(map_path: pathlib.Path, connectedness: int) -> tuple:
-    """One node per free cell ('.' or 'G'); y is flipped so the result reads right-side up."""
+def _bresenham_cells(x0: int, y0: int, x1: int, y1: int) -> list:
+    """Integer cells from (x0, y0) to (x1, y1) inclusive, each step moving by exactly one cell
+    orthogonally or diagonally -- i.e. never skipping past an intervening cell, which is what
+    makes this usable as a line-of-sight check between two grid cells that are `stride` apart."""
+    dx = abs(x1 - x0)
+    sx = 1 if x0 < x1 else -1
+    dy = -abs(y1 - y0)
+    sy = 1 if y0 < y1 else -1
+    err = dx + dy
+    x, y = x0, y0
+    cells = [(x, y)]
+    while (x, y) != (x1, y1):
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x += sx
+        if e2 <= dx:
+            err += dx
+            y += sy
+        cells.append((x, y))
+    return cells
+
+
+def _connected_components(nodes: dict) -> list:
+    """Labels grouped by connected component, largest first is NOT guaranteed here -- callers
+    that care about size order sort the result themselves."""
+    seen = set()
+    components = []
+    for start in nodes:
+        if start in seen:
+            continue
+        comp = {start}
+        seen.add(start)
+        queue = collections.deque([start])
+        while queue:
+            u = queue.popleft()
+            for v in nodes[u]["next"]:
+                if v not in seen:
+                    seen.add(v)
+                    comp.add(v)
+                    queue.append(v)
+        components.append(comp)
+    return components
+
+
+def _full_free_neighbors(free: set, x: int, y: int, connectedness: int):
+    """Unit-step neighbours of (x, y) in the un-thinned free-cell grid, honouring the same
+    diagonal corner-cutting rule as the rest of this module -- used for bridge-repair, which
+    needs to route through cells `stride` skipped over rather than only the kept lattice."""
+    moves = list(_ORTHOGONAL_MOVES)
+    if connectedness == 8:
+        moves += _DIAGONAL_MOVES
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if (nx, ny) not in free:
+            continue
+        if dx != 0 and dy != 0 and ((x + dx, y) not in free or (x, y + dy) not in free):
+            continue
+        yield nx, ny
+
+
+def _bridge_path(free: set, connectedness: int, source_cells, target_cells):
+    """Shortest path (list of cells, source-first) from any of `source_cells` to any of
+    `target_cells`, breadth-first over every free cell -- not just kept ones -- so the bridge can
+    cut through cells `stride` skipped over. Returns None if the two sets sit in different
+    free-cell components of the map itself, a real map property thinning had nothing to do with.
+    """
+    target_cells = set(target_cells)
+    prev = {cell: None for cell in source_cells}
+    queue = collections.deque(source_cells)
+    while queue:
+        cur = queue.popleft()
+        if cur in target_cells:
+            path = [cur]
+            while prev[path[-1]] is not None:
+                path.append(prev[path[-1]])
+            path.reverse()
+            return path
+        for nb in _full_free_neighbors(free, *cur, connectedness):
+            if nb not in prev:
+                prev[nb] = cur
+                queue.append(nb)
+    return None
+
+
+def _reconnect_thinned_components(nodes: dict, free: set, connectedness: int, height: int) -> None:
+    """Repair fragmentation caused by `stride` thinning: bridge every disconnected component back
+    to the largest one by inserting the shortest full-resolution path of free cells between them
+    as extra nodes/edges (a targeted, local drop back to stride=1 rather than a global one).
+    Mutates `nodes` in place.
+    """
+    components = _connected_components(nodes)
+    if len(components) <= 1:
+        return
+
+    cell_by_label = {
+        label: (int(info["x"]), height - 1 - int(info["y"])) for label, info in nodes.items()
+    }
+
+    components.sort(key=len, reverse=True)
+    main = components[0]
+    bridged, unreachable = 0, 0
+    for comp in components[1:]:
+        source_cells = [cell_by_label[label] for label in comp]
+        target_cells = [cell_by_label[label] for label in main]
+        path = _bridge_path(free, connectedness, source_cells, target_cells)
+        if path is None:
+            unreachable += 1
+            continue
+
+        prev_label = None
+        for (x, y) in path:
+            yf = height - 1 - y
+            label = _movingai_node_label(x, yf)
+            if label not in nodes:
+                nodes[label] = {"x": float(x), "y": float(yf), "next": []}
+                cell_by_label[label] = (x, y)
+            if prev_label is not None:
+                if label not in nodes[prev_label]["next"]:
+                    nodes[prev_label]["next"].append(label)
+                if prev_label not in nodes[label]["next"]:
+                    nodes[label]["next"].append(prev_label)
+            prev_label = label
+        main = main | comp
+        bridged += 1
+
+    if bridged:
+        print(f"  note: stride thinning fragmented the grid into {len(components)} components; "
+              f"inserted {bridged} full-resolution bridge path(s) to reconnect them")
+    if unreachable:
+        print(f"  warning: {unreachable} component(s) could not be reconnected -- their "
+              f"free-cell region has no path to the rest of the map regardless of stride")
+
+
+def _grid_line_of_sight(free: set, x0: int, y0: int, x1: int, y1: int) -> bool:
+    """Whether every cell on the Bresenham line between two grid cells is free, including the
+    corner cells flanking each diagonal step (same corner-cutting check `_parse_movingai_map`
+    always applied at 8-connectedness) -- needed once `stride` > 1 puts other cells' worth of
+    wall between two kept nodes that a naive endpoint-only check would miss."""
+    cells = _bresenham_cells(x0, y0, x1, y1)
+    if any(cell not in free for cell in cells):
+        return False
+    for (ax, ay), (bx, by) in zip(cells, cells[1:]):
+        if ax != bx and ay != by and ((ax, by) not in free or (bx, ay) not in free):
+            return False
+    return True
+
+
+def _remove_redundant_rungs(nodes: dict) -> dict:
+    """Drop a cardinal edge (P, Q) when both endpoints already have a full pass-through along the
+    axis perpendicular to that edge -- i.e. both of P's and both of Q's neighbours on that other
+    axis are present. This is the parallel-rail case in a corridor wider than one cell: picture a
+    2-wide corridor as two rails with a rung (a straight cross-edge) at every row. A rung is only
+    load-bearing where a rail's straight-through pass actually breaks -- a real corner, junction,
+    dead end, or the run's open ends -- because that's the only place the rung is the sole
+    remaining route between the two rails. Every interior rung, where both rails already run
+    straight past it on both sides, is a duplicate of whatever rung sits at the run's boundary.
+
+    Runs entirely off the *original* grid's neighbour structure (never off edges already removed
+    by this same pass), so removal order can't cascade into removing a rung that turns out to be
+    needed. Only cardinal edges are considered -- a diagonal edge (8-connectedness) is left alone,
+    since "perpendicular axis" isn't well-defined for it here.
+
+    Meant to run before `_simplify_collinear_chains`: once its rung is gone, an interior rail node
+    is a plain degree-2 collinear pass-through and that pass collapses it away too. Together the
+    two passes reduce a wide straight run to just its two end cross-sections -- exactly what a
+    minimal roadmap through it needs, and no more.
+
+    Only applies where the map is genuinely 1-D at that point, i.e. an actual corridor rail: a
+    node is excluded from removal entirely if it has full pass-through in *both* cardinal axes at
+    once (a real corridor rail never does -- it always has a wall on its outer side, capping it at
+    3 neighbours). Without that guard, a true 2-D open room -- where interior cells are fully
+    surrounded and so satisfy the perpendicular-pass-through test in both orientations at once --
+    gets its edges stripped in both directions independently and collapses toward its bare
+    perimeter, destroying interior cells a robot needs to be able to step into to let another
+    robot pass. A corridor rail is never fully-surrounded, so this changes nothing there.
+    """
+    def has_neighbor(label: str, dx: float, dy: float) -> bool:
+        target = _movingai_node_label(int(nodes[label]["x"] + dx), int(nodes[label]["y"] + dy))
+        return target in nodes[label]["next"]
+
+    def fully_surrounded(label: str) -> bool:
+        return all(has_neighbor(label, dx, dy)
+                   for dx, dy in ((1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)))
+
+    removable_edges = set()
+    for label, info in nodes.items():
+        if fully_surrounded(label):
+            continue
+        for nb in info["next"]:
+            if fully_surrounded(nb):
+                continue
+            dx = nodes[nb]["x"] - info["x"]
+            dy = nodes[nb]["y"] - info["y"]
+            if dx != 0 and dy != 0:
+                continue  # diagonal edge -- not handled here
+            perp = [(0.0, 1.0), (0.0, -1.0)] if dx != 0 else [(1.0, 0.0), (-1.0, 0.0)]
+            if (all(has_neighbor(label, pdx, pdy) for pdx, pdy in perp)
+                    and all(has_neighbor(nb, pdx, pdy) for pdx, pdy in perp)):
+                removable_edges.add(frozenset((label, nb)))
+
+    result = {label: {"x": info["x"], "y": info["y"], "next": list(info["next"])}
+              for label, info in nodes.items()}
+    for edge in removable_edges:
+        a, b = tuple(edge)
+        result[a]["next"].remove(b)
+        result[b]["next"].remove(a)
+    return result
+
+
+def _simplify_collinear_chains(nodes: dict) -> dict:
+    """Drop redundant waypoints: a degree-2 node whose two incident edges run in exactly the same
+    direction (it sits on a dead-straight stretch between its neighbours) is merged away, joining
+    its two neighbours with one direct edge. Junctions (degree != 2) and turns (degree == 2 but
+    the incoming/outgoing directions differ) are never touched.
+
+    This is the density knob for `--method grid` that actually fits a maze-like map: `--stride`
+    thins nodes by lattice position, which on a map dominated by 1-cell-wide corridors just moves
+    the density problem into `_reconnect_thinned_components`'s full-resolution bridge repair --
+    the corridor comes back at full density anyway, as one single-file chain with no alternative
+    routing. Collapsing collinear runs instead removes exactly the nodes that were never adding
+    path choice or a direction change, wherever a corridor happens to run straight, while leaving
+    every junction and every turn -- and therefore every turn angle a planned path can ever
+    present to the MPC -- completely unchanged. It also can't fragment the graph: it's a lossless
+    topological contraction (same reachability, same turns), not a resample, so there is nothing
+    for a repair pass to fix afterwards.
+    """
+    def direction(a_label: str, b_label: str) -> tuple:
+        return (nodes[b_label]["x"] - nodes[a_label]["x"], nodes[b_label]["y"] - nodes[a_label]["y"])
+
+    def is_collinear(label: str) -> bool:
+        neighbors = nodes[label]["next"]
+        if len(neighbors) != 2:
+            return False
+        a, b = neighbors
+        return direction(a, label) == direction(label, b)
+
+    removable = {label for label in nodes if is_collinear(label)}
+    kept = {label: {"x": info["x"], "y": info["y"], "next": []}
+            for label, info in nodes.items() if label not in removable}
+
+    def walk_to_kept(prev: str, cur: str) -> str:
+        while cur in removable:
+            a, b = nodes[cur]["next"]
+            prev, cur = cur, (b if a == prev else a)
+        return cur
+
+    seen_edges = set()
+    for label in kept:
+        for nb in nodes[label]["next"]:
+            end = walk_to_kept(label, nb) if nb in removable else nb
+            edge = frozenset((label, end))
+            if edge in seen_edges:
+                continue
+            seen_edges.add(edge)
+            kept[label]["next"].append(end)
+            kept[end]["next"].append(label)
+
+    return kept
+
+
+def _parse_movingai_map(map_path: pathlib.Path, connectedness: int, stride: int = 1,
+                         simplify: bool = False) -> tuple:
+    """One node per free cell ('.' or 'G'), or every `stride`-th free cell on both axes when
+    `stride` > 1; y is flipped so the result reads right-side up.
+
+    `stride` thins the dense one-node-per-cell grid down to a coarser lattice -- the grid
+    equivalent of the sampled method's `--density`. Edges connect kept cells that are `stride`
+    apart via `_grid_line_of_sight`, so a hop is only added when the straight path between the
+    two nodes doesn't cross a wall that the thinning skipped over. Thinning a map with narrow
+    corridors can fragment the lattice into disconnected components; `_reconnect_thinned_components`
+    repairs that by bridging each one back to the largest with a full-resolution path.
+
+    `simplify`, applied after thinning/repair, is the density knob that actually suits a map
+    dominated by narrow corridors: it drops every waypoint that isn't a junction or a turn (see
+    `_simplify_collinear_chains`), which is where `stride` mostly fails -- corridor cells rarely
+    land on the thinned lattice, so they come back at full density via bridge repair anyway, as a
+    single-file chain with no alternative routing. `simplify` alone (`stride=1`) already collapses
+    those chains to their turns and junctions, usually without needing `stride` at all.
+    """
     if connectedness not in (4, 8):
         raise ValueError(f"connectedness must be 4 or 8, got {connectedness}")
+    if stride < 1:
+        raise ValueError(f"stride must be >= 1, got {stride}")
 
     rows = _read_map_rows(map_path)
     height = len(rows)
@@ -319,22 +647,32 @@ def _parse_movingai_map(map_path: pathlib.Path, connectedness: int) -> tuple:
             if char in ".G":
                 free.add((x, y))
 
+    kept = {(x, y) for (x, y) in free if x % stride == 0 and y % stride == 0}
+    if not kept:
+        raise ValueError(f"stride {stride} leaves no free cells kept -- pick a smaller stride")
+
     nodes = {}
-    for (x, y) in free:
+    for (x, y) in kept:
         yf = height - 1 - y
         nodes[_movingai_node_label(x, yf)] = {"x": float(x), "y": float(yf), "next": []}
 
-    for (x, y) in free:
+    moves = list(_ORTHOGONAL_MOVES)
+    if connectedness == 8:
+        moves += _DIAGONAL_MOVES
+
+    for (x, y) in kept:
         label = _movingai_node_label(x, height - 1 - y)
-        for dx, dy in _ORTHOGONAL_MOVES:
-            if (x + dx, y + dy) in free:
-                nodes[label]["next"].append(_movingai_node_label(x + dx, height - 1 - (y + dy)))
-        if connectedness == 8:
-            for dx, dy in _DIAGONAL_MOVES:
-                if ((x + dx, y + dy) in free
-                        and (x + dx, y) in free       # horizontal side clear
-                        and (x, y + dy) in free):     # vertical side clear
-                    nodes[label]["next"].append(_movingai_node_label(x + dx, height - 1 - (y + dy)))
+        for dx, dy in moves:
+            nx, ny = x + dx * stride, y + dy * stride
+            if (nx, ny) in kept and _grid_line_of_sight(free, x, y, nx, ny):
+                nodes[label]["next"].append(_movingai_node_label(nx, height - 1 - ny))
+
+    if stride > 1:
+        _reconnect_thinned_components(nodes, free, connectedness, height)
+
+    if simplify:
+        nodes = _remove_redundant_rungs(nodes)
+        nodes = _simplify_collinear_chains(nodes)
 
     return nodes, height
 
@@ -529,7 +867,8 @@ def _movingai_scenario_path(map_dir: pathlib.Path, scenario) -> pathlib.Path:
 
 
 def convert_movingai(map_name: str, scenario, n_agents: int, out_name: str, method: str = "sampled",
-                      connectedness: int = 4, density: float = 0.02, clearance=None,
+                      connectedness: int = 4, stride: int = 1, simplify: bool = False,
+                      density: float = 0.02, clearance=None,
                       stretch: float = 1.5, max_edge_length=None, speed: float = 1.0,
                       seed=None, environment: bool = True, cell_size: float = 1.0) -> pathlib.Path:
     map_dir = _movingai_map_dir(map_name)
@@ -539,8 +878,15 @@ def convert_movingai(map_name: str, scenario, n_agents: int, out_name: str, meth
         raise FileNotFoundError(f"no such scenario file: {scen_path}")
 
     if method == "grid":
-        nodes, height = _parse_movingai_map(map_path, connectedness)
-        pairs = _parse_movingai_scenario(scen_path, height)
+        nodes, height = _parse_movingai_map(map_path, connectedness, stride, simplify)
+        if stride == 1 and not simplify:
+            pairs = _parse_movingai_scenario(scen_path, height)
+        else:
+            # A scenario's start/goal cells generally don't survive thinning (stride > 1) or
+            # collinear-chain collapse (simplify), so snap them to their nearest surviving node,
+            # same as the sampled method does for its own (unrelated) reason.
+            pairs = _match_scenario_to_roadmap(
+                _parse_movingai_scenario_cells(scen_path, height), nodes, n_agents)
     elif method == "sampled":
         if clearance is None:
             from aoccbs.models.model1.roadmap import DEFAULT_CLEARANCE
@@ -622,6 +968,22 @@ def main() -> None:
                              "'grid': one node per free cell.")
     p_mai.add_argument("--connectedness", type=int, choices=[4, 8], default=4,
                         help="--method grid only")
+    p_mai.add_argument("--stride", type=int, default=1,
+                        help="--method grid only: keep only every stride-th free cell on each "
+                             "axis (1 = one node per free cell, the previous default behaviour). "
+                             "Raise it to thin a grid graph that has too many nodes; edges "
+                             "between kept cells are added only when the straight path between "
+                             "them doesn't cross a wall the thinning skipped over. On a map with "
+                             "narrow corridors this mostly just relocates the density into "
+                             "bridge-repair (see --simplify), so prefer --simplify there.")
+    p_mai.add_argument("--simplify", action="store_true",
+                        help="--method grid only: drop every waypoint that is neither a junction "
+                             "nor a turn, merging dead-straight runs of collinear cells into one "
+                             "edge. This is the density knob that suits maze-like/corridor-heavy "
+                             "maps: unlike --stride it can't fragment the graph and never changes "
+                             "any turn angle (junctions and turns are kept exactly as-is), so it's "
+                             "safe with a tight MPC turning-angle limit. Combine with --stride if "
+                             "you also want open areas thinned.")
     p_mai.add_argument("--density", type=float, default=0.02,
                         help="--method sampled only: roadmap vertices per unit area")
     p_mai.add_argument("--clearance", type=float, default=None,
@@ -653,7 +1015,8 @@ def main() -> None:
     elif args.command == "movingai":
         convert_movingai(
             args.map_name, args.scenario, args.n_agents, args.out, method=args.method,
-            connectedness=args.connectedness, density=args.density, clearance=args.clearance,
+            connectedness=args.connectedness, stride=args.stride, simplify=args.simplify,
+            density=args.density, clearance=args.clearance,
             stretch=args.stretch, max_edge_length=args.max_edge_length, speed=args.speed,
             seed=args.seed, environment=args.environment, cell_size=args.cell_size)
     elif args.command == "movingai-list":
