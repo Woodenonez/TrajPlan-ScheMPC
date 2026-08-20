@@ -42,6 +42,20 @@ class NetGraph(nx.Graph):
         edge_list = data['edge_list']
         return cls(node_dict, edge_list)
 
+    @classmethod
+    def from_test_case_json(cls, json_path:str):
+        """Build the graph straight from a `test_cases/<problem>.json`'s `test_data.nodes`
+        (each `{x, y, next}`), instead of a separately-maintained `graph.json` copy -- the
+        latter has no reference back to the test case, so a hand-edit to one and not the
+        other lets a robot's actual roadmap silently diverge from the one the scheduler used.
+        """
+        with open(json_path, 'r') as jf:
+            data = json.load(jf)
+        nodes = data['test_data']['nodes']
+        node_dict = {node_id: (attrs['x'], attrs['y']) for node_id, attrs in nodes.items()}
+        edge_list = list({tuple(sorted((node_id, nb))) for node_id, attrs in nodes.items() for nb in attrs['next']})
+        return cls(node_dict, edge_list)
+
     def get_node_coord(self, node_id) -> tuple:
         x = self.nodes[node_id][self._position_key][0]
         y = self.nodes[node_id][self._position_key][1]
