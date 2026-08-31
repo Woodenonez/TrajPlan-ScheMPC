@@ -176,6 +176,34 @@ comparable across all three backends.
 
 The tracker is a small state machine (`work_mode` / `_mode`: `aligning`, `safe`, `work`, …) plus an `idle`/termination check per robot; the loop ends when every robot terminates or `TIMEOUT` ticks elapse. Actual arrival times are recorded and written to `data/schedule_demo2_data/Actual_<problem>.csv` for comparison against the planned schedule — that pairing is what `schedule_visualization.py` plots.
 
+#### Recording actual arrivals — `pkg_motion_plan/arrival_logger.py`
+
+`ArrivalLogger` is what produces `Actual_<problem>.csv`, in `schedule.csv`'s own
+`robot_id,node_id,ETA` columns so the two join on `(robot_id, node_id)`. `run_mpc` builds one
+from the schedule (`logger_from_schedule(gpc, robot_ids)`), calls `update(rid, t, xy)` once per
+robot per tick — before the idle check, so a robot parked on its last node still gets that
+arrival — then `finalize()` and `to_csv(...)`. Anything that can produce positions over time can
+reuse it; nothing in it is MPC-specific.
+
+Arrival is **geometric**: the robot's closest approach to the node, during the pass in which it
+came within `arrival_tol` (default 0.5 m) of it. It deliberately does *not* read the local
+planner's `_current_target_node`, which is what the previous inline version did: the planner
+advances its target with a horizon of lookahead, so it leaves a node's index while the robot is
+still short of it, and it targets the start node too briefly to register — which is why the
+start node was missing from every `Actual_*.csv` produced before this. Three details matter:
+
+- **Route order disambiguates repeated nodes.** A node only becomes eligible once its
+  predecessor is settled, so a robot standing on its start node does not also timestamp the
+  later revisit of that same node at t=0. (`4Small` revisits nodes on every robot.)
+- **Cut corners still get a row**, timestamped at closest approach and flagged `exact=False`
+  in `to_dataframe(include_flags=True)`; the CSV itself keeps only the three schedule columns.
+- **The tolerance is auto-capped** at half the distance to a node's nearer route neighbour, so
+  on dense roadmaps (MovingAI/CCBS graphs space nodes well under a metre apart) one node's ball
+  cannot swallow the next and drop a row.
+
+`unreached()` names the scheduled nodes that produced no arrival at all — empty on a clean run,
+populated after a timeout or a failure; `run_mpc` prints it.
+
 Configuration is YAML in `config/`, loaded through the dataclass-ish loaders in `src/configs.py`: `mpc_fast.yaml` / `mpc_default.yaml` (`MpcConfiguration`) and `robot_spec.yaml` (`CircularRobotSpecification`). Both `build_solver.py` and `run_mpc.py` name their config file independently — **keep them pointing at the same file**, or the compiled solver will not match the runtime problem dimensions.
 
 #### Three NMPC backends — the `mpc_backend` flag, or `solver_type` in `config/mpc_*.yaml`

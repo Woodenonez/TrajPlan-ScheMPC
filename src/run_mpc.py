@@ -4,7 +4,6 @@ import pathlib
 import datetime
 
 import numpy as np
-import pandas as pd # type: ignore
 from shapely.geometry import Point, Polygon # type: ignore
 from shapely.ops import unary_union # type: ignore
 
@@ -12,6 +11,7 @@ from basic_motion_model.motion_model import UnicycleModel
 
 from pkg_motion_plan import GlobalPathCoordinator
 from pkg_motion_plan import LocalTrajPlanner
+from pkg_motion_plan import logger_from_schedule
 from pkg_mpc_tracker import TrajectoryTracker
 from pkg_robot.robot import RobotManager
 
@@ -289,7 +289,10 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                                            color=color_list[i % len(color_list)])
             visualizer.plot(main_plotter.map_ax, *robot.state)
 
-    actual_timetable = {rid: [] for rid in robot_ids}
+    ### Records when each robot actually reaches each node of its schedule, and writes that
+    ### out below in `schedule.csv`'s own `robot_id,node_id,ETA` format, so planned and
+    ### actual can be joined on (robot_id, node_id) and differenced.
+    arrival_logger = logger_from_schedule(gpc, robot_ids)
     last_pos = {rid: None for rid in robot_ids}
     stuck_ticks = {rid: 0 for rid in robot_ids}
     failure = None
@@ -315,6 +318,11 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
             controller = robot_manager.get_controller(rid)
             visualizer = robot_manager.get_visualizer(rid)
             other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
+
+            # Logged before the idle check, and before this tick's step, so that the time
+            # stamp is the time of the position being reported -- and so that a robot which
+            # has already parked on its final node still gets that arrival recorded.
+            arrival_logger.update(rid, kt*config_mpc.ts, robot.state[:2])
 
             if controller.idle:
                 if not headless:
@@ -359,11 +367,6 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                                    debug_info['step_runtime'],
                                    debug_info['monitored_cost'],
                                    object_id=f"Robot {rid}")
-
-            if not actual_timetable[rid] or actual_timetable[rid][-1][1] != gpc.get_node_id(planner._current_target_node):
-                actual_timetable[rid].append((kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node)))
-            else: # overwrite the time
-                actual_timetable[rid][-1] = (kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node))
 
             ### Real run
             # controller.run_step re-solves every tick (this loop calls it once per kt,
@@ -465,20 +468,14 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
         input('Press anything to finish!')
         main_plotter.close()
 
-    # Convert actual_timetable to DataFrame and save to CSV
-    rows = []
-    for rid, schedule in actual_timetable.items():
-        for time, node_id in schedule:
-            rows.append({
-                'robot_id': rid,
-                'node_id': node_id,
-                'ETA': time
-            })
-    actual_df = pd.DataFrame(rows)
-    actual_df = actual_df.sort_values(['robot_id', 'ETA'])
+    # The realised timetable, in the planned schedule's own format.
+    arrival_logger.finalize()
     actual_schedule_path = os.path.join(data_dir, f"Actual_{problem}.csv")
-    actual_df.to_csv(actual_schedule_path, index=False)
+    arrival_logger.to_csv(actual_schedule_path)
     print(f"Actual schedule saved to: {actual_schedule_path}")
+    unreached = arrival_logger.unreached()
+    if unreached:
+        print(f"[run_mpc] Nodes never reached: {unreached}")
 
     if MONITOR_COST and not headless: # XXX
         import matplotlib.pyplot as plt # type: ignore
