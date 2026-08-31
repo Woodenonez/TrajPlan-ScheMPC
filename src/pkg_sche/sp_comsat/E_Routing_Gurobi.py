@@ -31,6 +31,11 @@ def routing(the_instance, previous_routes = []):
     charging_time = m.addVars([i.id for i in vehicles],
                               [i.id for i in tasks], vtype=GRB.INTEGER, name='charging_time')
 
+    # binary variable that states whether vehicle k terminates its (open) route at task i,
+    # i.e. i is the last task served by k and the vehicle simply stays there
+    route_end = m.addVars([i.id for i in vehicles],
+                          [i.id for i in tasks], vtype=GRB.BINARY, name='route_end')
+
     # 28 the cost function is number of visits to the recharge station while at the same time minimizing
     m.setObjective(
         quicksum([
@@ -204,29 +209,48 @@ def routing(the_instance, previous_routes = []):
         if k.task_type == 'recharge'
     )
 
-    # 43 guarantee the flow conservation between start and end
+    # 43 guarantee the flow conservation along a route: a vehicle that arrives at a task either
+    # leaves it again or terminates its route there (routes are open, see 44/44.1/44.2 below)
     flow = m.addConstrs(
-        quicksum([direct_travel[k.id, i.id, j.id] for j in tasks if j.task_type != 'start'])
-        ==
         quicksum([direct_travel[k.id, j.id, i.id] for j in tasks if j.task_type != 'end'])
+        ==
+        quicksum([direct_travel[k.id, i.id, j.id] for j in tasks if j.task_type != 'start'])
+        + route_end[k.id, i.id]
         for k in vehicles
         for i in tasks
         if i.task_type != 'start'
         and i.task_type != 'end'
     )
 
-    # 44 routes must be closed (i.e. every vehicle that goes out has to come back)
-    route_continuity = m.addConstrs(
-        quicksum([direct_travel[k.id, i.id, j.id] for j in tasks])
-        ==
-        quicksum([direct_travel[k.id, l.id, m.id] for l in tasks])
-
+    # 44 routes are OPEN: no vehicle ever travels back to a depot ('end') task, so the 'end' tasks
+    # are left isolated in the graph. This also subsumes the old "no travel from start to end"
+    # constraint that ruled out empty routes.
+    no_travel_to_end = m.addConstrs(
+        direct_travel[k.id, i.id, j.id] == 0
         for k in vehicles
         for i in tasks
-        for m in tasks
+        for j in tasks
+        if j.task_type == 'end'
+    )
+
+    # 44.1 a route can only terminate at a task that is actually served by the route, i.e. neither at
+    # a depot ('start'/'end') nor at a recharging stop (which sits at a depot location anyway)
+    no_end_at_depot = m.addConstrs(
+        route_end[k.id, i.id] == 0
+        for k in vehicles
+        for i in tasks
         if i.task_type == 'start'
-        and m.task_type == 'end'
-        and i.location == m.location
+        or i.task_type == 'end'
+        or i.task_type == 'recharge'
+    )
+
+    # 44.2 every vehicle that leaves its depot terminates its route exactly once (and a vehicle that
+    # never leaves has no terminal task at all)
+    one_end_per_route = m.addConstrs(
+        quicksum([route_end[k.id, i.id] for i in tasks])
+        ==
+        quicksum([direct_travel[k.id, i.id, j.id] for i in tasks for j in tasks if i.task_type == 'start'])
+        for k in vehicles
     )
 
    # 45 if a number of tasks belongs to one job, they have to take place in sequence
@@ -245,17 +269,6 @@ def routing(the_instance, previous_routes = []):
             quicksum([ direct_travel[ k[0].id, k[1].id, k[2].id ] for k in blabla[j] ]) <= len(blabla[j]) - 1
             for j in blabla
         )
-
-    # no travel from start to end (no empty routes)
-    # NOT INCLUDED IN THE PAPER BECAUSE REDOUNDANT because of the cost function
-    no_from_start_to_end = m.addConstrs(
-        direct_travel[k.id, i.id, j.id] == 0
-        for k in vehicles
-        for i in tasks
-        for j in tasks
-        if i.task_type == 'start'
-        and j.task_type == 'end'
-    )
 
     # vehicles can only start at the depot the are assigned to
     vehicles_to_their_depots = m.addConstrs(
@@ -319,11 +332,16 @@ def routing(the_instance, previous_routes = []):
                 if i[0].task_type == 'start':
                     routes.update({k:[i]})
         # # here i concatenate the routes by matching the last location of a direct travel with the first of another one
+        # routes are open, so a route is complete as soon as its last task has no outgoing direct travel
         for j in routes:
-            while routes[j][-1][1].task_type != 'end':
+            extended = True
+            while extended:
+                extended = False
                 for i in segments[j]:
                     if i[0].id == routes[j][-1][1].id:
                         routes[j].append(i)
+                        extended = True
+                        break
         # let's just change the format of storing the routes
         routes_2 = {route:[routes[route][0][0]] for route in routes}
         for route1, route2 in zip(routes, routes_2):

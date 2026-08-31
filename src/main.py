@@ -2,6 +2,7 @@ import os
 import pathlib
 import json
 import csv
+import sys
 
 
 project_root = pathlib.Path(__file__).resolve().parents[1]
@@ -11,7 +12,8 @@ data_path = os.path.join(project_root, "data")
 
 def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False,
                   scheduler_backend="sp_comsat", mpc_backend=None, assign_via_routing=False,
-                  first_solution_only=False):
+                  first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
+                  collision_check=True, collision_margin=0.0):
     if scheduler:
         if scheduler_backend == "sp_comsat":
             from pkg_sche.sp_comsat.Compo_slim import Compo_slim
@@ -54,8 +56,11 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         with open(f"{data_path}/test_cases/{problem}.json",'r') as read_file:
             data = json.load(read_file)
             EnvFolder = data['test_data']['Environment']
-        run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref,
-                recording=recording, mpc_backend=mpc_backend)
+        return run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref,
+                recording=recording, mpc_backend=mpc_backend, headless=headless,
+                late_threshold_s=late_threshold_s, stuck_timeout_s=stuck_timeout_s,
+                collision_check=collision_check, collision_margin=collision_margin)
+    return None
 
 if __name__ == "__main__":
     # problem = '4Small' # SAFETY COEFF 20
@@ -63,23 +68,42 @@ if __name__ == "__main__":
     # problem = "10Large"
     # problem = 'ccbs_sparse_1_4'
     # problem = 'movingai_empty16_1_8'
-    problem = 'test_5' # why do agents go to a THIRD location?
-    general_funct(
-        problem,
+    # problem = 'test_4' # why do agents go to a THIRD location?
+    result = general_funct(
+        sys.argv[1],
         scheduler = True,
         controller= True,
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
-        scheduler_backend= "aoccbs", # "sp_comsat", "occbs", or "aoccbs"
+        scheduler_backend= "sp_comsat", # "sp_comsat", "occbs", or "aoccbs"
         assign_via_routing= False, # aoccbs only: use sp_comsat's Gurobi routing sub-solver to
                               # assign jobs to robots first, instead of requiring every job
                               # pre-pinned to one ATR (see pkg_sche.aoccbs.runner)
         first_solution_only= False, # aoccbs only: stop at the first feasible joint plan instead
                               # of running the normal anytime search out to optimality/timelimit
-        mpc_backend= "panoc" # "casadi" (IPOPT, no build step); "panoc" or "panoc_light" (both
+        mpc_backend= "panoc", # "casadi" (IPOPT, no build step); "panoc" or "panoc_light" (both
                               # need build_solver.py, with panoc_builder set to match -- see
                               # build_solver.py); None falls back to solver_type in config/mpc_fast.yaml
+        headless= False, # True = no matplotlib window, no blocking prompt at the end; run
+                              # non-interactively and just return/print a status dict --
+                              # see late_threshold_s/stuck_timeout_s below for failure detection
+        late_threshold_s= False, # fail the run once a robot is still short of the node it is
+                              # targeting more than this many seconds past that node's
+                              # scheduled ETA. None disables the check.
+        stuck_timeout_s= False, # fail the run once a robot has not translated more than a couple
+                              # centimetres for this many consecutive seconds while active
+                              # (excluding in-place `aligning` rotation). None disables the check.
+        collision_check= False, # fail the run as soon as two robot bodies overlap, or a robot body
+                              # overlaps a static obstacle or leaves the map boundary. Robots are
+                              # discs of radius `vehicle_width` (config/robot_spec.yaml) and the
+                              # test uses the un-inflated map, so this is physical contact, not a
+                              # breach of the planner's safety margin. False disables the check.
+        collision_margin= False, # extra clearance (metres) required on top of the body radius before
+                              # the collision check trips: 0.0 = bodies must actually touch,
+                              # positive values also fail on near-misses (0.1 = closer than 10 cm).
     )
+    if result is not None and result["status"] != "success":
+        raise SystemExit(f"[main] run failed: {result}")
 
 

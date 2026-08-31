@@ -107,11 +107,32 @@ class TrajectoryTracker:
         # Initialization
         self._idle = True
         self._mode: str = 'none'
+        # Last speed reference handed over by the local planner. `set_work_mode('aligning')`
+        # zeroes `base_speed`; this is what restores it when the alignment finishes.
+        self._ref_speed_cmd: Optional[float] = None
         self._map_loaded = False
         self._init_guess = [0.0]*self.nu*self.N_hor
         # Measured heading arrives wrapped to [-pi, pi]; the MPC needs it continuous.
         self._last_measured_theta_wrapped: Optional[float] = None
         self._last_measured_theta_continuous: Optional[float] = None
+        # Last *measured* (true plant) position, and whether it changed on the last update.
+        self._last_measured_position: Optional[np.ndarray] = None
+        self._measured_stalled = False
+        # Aligining watchdog. `aligning` holds base_speed at 0, so a mode that cannot reach
+        # its exit condition freezes the robot for the rest of the run. `_aligning_ticks`
+        # counts consecutive ticks spent in the mode and `_aligning_cooldown` blocks
+        # re-entry for a while after the watchdog has fired. The limit is twice the time a
+        # full 360-degree turn takes at `ang_vel_max`, so no legitimate alignment can hit it.
+        self._aligning_ticks = 0
+        self._aligning_cooldown = 0
+        # Two reference headings closer than this count as the same heading when
+        # `_dominant_ref_theta` looks for the heading the horizon mostly asks for. Ten
+        # degrees is well below the smallest corner a roadmap edge pair produces and well
+        # above the wobble a smoothly curving reference shows from one sample to the next.
+        self._theta_cluster_tol = math.radians(10.0)
+        self._aligning_tick_limit = int(
+            2 * (2*math.pi/max(float(robot_specification.ang_vel_max), 1e-6)) / max(float(self.ts), 1e-6)
+        )
         self._obstacle_weights()
         self.set_work_mode(mode='safe', use_predefined_speed=True)
 
@@ -368,6 +389,19 @@ class TrajectoryTracker:
         state_continuous[2] = measured_theta_continuous
         self._last_measured_theta_wrapped = measured_theta_wrapped
         self._last_measured_theta_continuous = measured_theta_continuous
+
+        # Track whether the *robot* actually moved between ticks. This is the only place the
+        # tracker sees the true plant state: `self.state` is overwritten by `run_solver` with
+        # a predicted state, and `past_states` is filled from those predictions too, so
+        # neither can tell "the simulation loop gated my step out" from "the solver planned a
+        # small move". `check_termination_condition` needs exactly that distinction.
+        measured_position = np.asarray(state_continuous[:2], dtype=float)
+        if self._last_measured_position is None:
+            self._measured_stalled = False
+        else:
+            self._measured_stalled = bool(np.linalg.norm(measured_position - self._last_measured_position) < 1e-6)
+        self._last_measured_position = measured_position.copy()
+
         self.state = state_continuous
 
     def set_ref_states(self, ref_states: np.ndarray, ref_speed:Optional[float]=None):
@@ -381,13 +415,132 @@ class TrajectoryTracker:
             This method will overwrite the base speed.
         """
         self.ref_states = ref_states
-        if ref_speed is not None:
+        # Remember the planner's speed command even while 'aligning' is suppressing it, so
+        # `_leave_aligning` can put it back. Without this the tracker has no way to recover a
+        # forward-speed reference once aligning has zeroed base_speed: the only other writer
+        # is the `elif` below, which is skipped for the whole duration of an aligning episode.
+        self._ref_speed_cmd = ref_speed
+        if self._mode == 'aligning':
+            # Aligining mode owns base_speed (held at 0 so the turn isn't fought by a
+            # forward-speed reference -- see set_work_mode). With ignore_speed_ref=False
+            # the scheduler supplies a real, non-None ref_speed on every tick; unconditionally
+            # writing it to base_speed here reintroduced a nonzero forward-speed reference one
+            # tick after aligining was entered, since set_work_mode no-ops (and so never
+            # re-zeroes base_speed) while the mode name is unchanged from the previous tick.
+            # _run_step's own theta_diff check, which runs right after this call, is the sole
+            # authority on entering/exiting 'aligining' -- leave base_speed alone here.
+            pass
+        elif ref_speed is not None:
             self.base_speed = ref_speed
-        elif self._mode != 'aligning':
+        else:
             # Only default to 'work' here when a heading correction isn't already in
             # progress -- unconditionally resetting to 'work' every tick discarded an
             # in-progress 'aligining' decision before it could ever accumulate.
             self.set_work_mode(mode='work', use_predefined_speed=True)
+
+    def _leave_aligning(self):
+        """Go back to 'work' mode, restoring the speed reference 'aligning' suppressed.
+
+        `set_work_mode('aligning')` zeroes `base_speed` so the in-place turn is not fought by
+        a forward-speed reference. Leaving via `set_work_mode('work', use_predefined_speed=
+        False)` does *not* undo that -- and `set_ref_states` refuses to write `base_speed`
+        while the mode is still 'aligning', so during an aligning episode nothing else writes
+        it either. The result was that `base_speed` stayed at 0 for the rest of the run once
+        any aligning episode had ended without `set_ref_states` seeing a non-aligning mode:
+        the robot solved every subsequent step against a zero speed reference and crawled or
+        sat still. Put the planner's own command back on the way out.
+        """
+        self.set_work_mode(mode='work', use_predefined_speed=self._ref_speed_cmd is None)
+        if self._ref_speed_cmd is not None:
+            self.base_speed = self._ref_speed_cmd
+
+    def _resolve_turn_around(self, ref_states: np.ndarray) -> np.ndarray:
+        """Rewrite the horizon where the reference path folds back on itself.
+
+        A schedule that sends a robot to a dead-end node and back (`test_7`'s A2 at v2, A1 at
+        v42) produces a horizon whose second half retraces its first half with the heading
+        reversed. Handed to the solver unchanged, that reference has no forward gradient at
+        all: tracking the outbound half and tracking the inbound half pull against each other
+        and the cheapest thing the MPC can do is park at the fold. Measured directly on
+        `test_7`/PANOC with this rewrite disabled -- A2 coasted into the fold and the commanded
+        speed decayed 0.66 -> 0.03 -> 0 over 12 ticks, after which it sat at (39.77, 36.18)
+        for the rest of the run. That is the reported "it simply freezes".
+
+        The rewrite replaces everything from the reversal onwards with a straight-line
+        continuation of the pre-turn direction, so the robot is given a plain "keep going"
+        reference right through the pivot. It then drives on until `LocalTrajPlanner`'s
+        docking index -- which is chosen by nearest position and is deliberately monotone --
+        lands on a post-turn sample. From that tick the planner's own `ref_states[0]` carries
+        the reversed heading, `theta_diff` jumps to ~180, and the ordinary aligning hysteresis
+        in `_run_step` turns the robot round. No special "commit to the turn" mode is needed,
+        and nothing here depends on the robot's own heading, so a turn once started cannot be
+        undone by the rotation that is executing it.
+
+        What must *not* be done is to hold the tail of the horizon at the pivot (what this
+        code used to do, in both of its branches). `run_mpc` suppresses `robot.step` entirely
+        once the robot is within 0.3 m of `current_refs[-1]`, so a pinned tail arrests the
+        robot ~0.3 m short of the fold -- and since the docking index never regresses and the
+        samples it would have to cross are all *ahead* of the stopped robot, the reference can
+        never advance again. That is a permanent freeze, and it is why the pivot has to be
+        driven through rather than aimed at.
+        """
+        if ref_states.shape[0] < 2:
+            return ref_states
+        ref_thetas = np.degrees(ref_states[:, 2]) % 360
+        reversed_mask = np.asarray(self.angle_diff(ref_thetas, ref_thetas[0])) > 170
+        if not reversed_mask.any():
+            return ref_states
+        turn_idx = int(np.argmax(reversed_mask)) # always >= 1: element 0 differs from itself by 0
+
+        last_pre_turn = np.asarray(ref_states[turn_idx-1], dtype=float)
+        # Continue at the reference's own sample spacing. It is not the nominal
+        # `lin_vel_max*ts`: `LocalTrajPlanner.downsample_ref_states` rescales the horizon by
+        # ref_speed/nominal_speed, so the spacing shrinks towards zero as a robot approaches a
+        # node it is early for. Fall back to the nominal step only when the reversal is at the
+        # very start of the horizon and there is no pre-turn segment to measure.
+        if turn_idx >= 2:
+            spacing = float(np.linalg.norm(ref_states[turn_idx-1, :2] - ref_states[turn_idx-2, :2]))
+        else:
+            spacing = 0.0
+        if spacing < 1e-9:
+            spacing = float(self.robot_spec.lin_vel_max) * float(self.ts)
+        heading = float(last_pre_turn[2])
+        step = np.array([math.cos(heading), math.sin(heading)]) * spacing
+
+        n_tail = self.N_hor - turn_idx
+        tail = np.tile(last_pre_turn, (n_tail, 1))
+        tail[:, :2] += np.outer(np.arange(1, n_tail+1), step)
+        return np.vstack((ref_states[:turn_idx, :], tail))
+
+    def _dominant_ref_theta(self, ref_states: np.ndarray) -> float:
+        """Return the heading the horizon mostly asks for, in radians on the reference branch.
+
+        The solver weights every sample's heading equally, so when the horizon straddles a
+        corner the heading cost is minimised by a compromise between the incoming and the
+        outgoing heading rather than by either of them. `aligning` mode therefore has to aim
+        at whichever of the two the horizon is mostly made of, not at `ref_states[0, 2]`:
+        aiming at the first sample while the solver is being pulled towards the other mode
+        is what let the mode's exit test go permanently unsatisfiable (see the call site).
+
+        Candidates are the sample headings themselves; each scores the number of samples
+        within `_theta_cluster_tol` of it, and ties keep the earliest candidate. Two
+        consequences worth knowing: on a straight horizon every sample agrees, so the result
+        is exactly `ref_states[0, 2]` and nothing about the old behaviour changes; and while
+        a corner is only just entering the far end of the horizon the incoming heading still
+        dominates, so the robot is not sent pivoting towards a heading it does not need for
+        several more metres.
+        """
+        if ref_states.shape[0] == 0:
+            return 0.0
+        thetas = np.asarray(ref_states[:, 2], dtype=float)
+        best_theta = float(thetas[0])
+        best_count = -1
+        for cand in thetas:
+            count = int(np.count_nonzero(np.abs(self.wrap_to_pi(thetas - cand)) < self._theta_cluster_tol))
+            if count > best_count:
+                best_count = count
+                best_theta = float(cand)
+        return best_theta
 
     def check_termination_condition(self, external_check=True) -> bool:
         """Check if the robot finishes the trajectory tracking.
@@ -411,10 +564,17 @@ class TrajectoryTracker:
                 # then sits still, in tolerance, never declared finished. Having
                 # actually stopped moving is arrival just as much as having been
                 # commanded to slow down, so either one ends the tracking.
-                stopped = False
-                if len(self.past_states) >= 2:
-                    stopped = bool(np.linalg.norm(np.asarray(self.past_states[-1], dtype=float)[:2] -
-                                                  np.asarray(self.past_states[-2], dtype=float)[:2]) < 1e-3)
+                # `past_states` holds solver *predictions*, not measurements (`run_solver`
+                # appends `taken_states`, and `run_mpc` may then gate `robot.step` out
+                # entirely), so comparing its last two entries reported "still moving" for a
+                # robot that had been standing still for thousands of ticks. On `test_7`
+                # both A2 and A3 arrested ~0.2 m short of their final node -- inside the 0.5 m
+                # tolerance above and inside `run_mpc`'s 0.3 m step gate -- yet never
+                # terminated, because the *planned* actions stayed above 0.1 and the
+                # *predicted* states kept differing. The simulation then ran to TIMEOUT with
+                # two robots visibly frozen. Use the measured plant position instead; see
+                # `set_current_state`.
+                stopped = self._measured_stalled
                 if abs(self.past_actions[-1][0]) < 0.1 or stopped:
                     self._idle = True
                     if self.vb:
@@ -483,7 +643,21 @@ class TrajectoryTracker:
         ### Get reference states ###
         ref_states = self._unwrap_reference_states(self.ref_states.copy())
         finish_state = ref_states[-1,:]
-        current_refs = ref_states.reshape(-1).tolist()
+
+        ### Resolve path reversals BEFORE deciding the work mode ###
+        # The horizon handed to the solver is not always `ref_states`: where the reference
+        # path folds back on itself (a robot that must drive to a dead-end node and return)
+        # it is rewritten by `_resolve_turn_around`. The heading the robot is actually being
+        # asked for is therefore `current_ref_states[0, 2]`, not `ref_states[0, 2]`, and the
+        # aligning hysteresis below must be judged against that -- otherwise a committed
+        # turn-around reports a ~0 degree heading error (the robot *is* aligned with the
+        # un-rewritten reference it is no longer tracking), the hysteresis leaves 'aligning'
+        # on the same tick the turn-around re-enters it, and the two latch: base_speed stays
+        # pinned at 0 while the robot sits at the fold rotating back and forth. Observed on
+        # `test_7`/PANOC as A1 stalling permanently from tick 919 and A2 wobbling at the v2
+        # dead end for 350 ticks (70 simulated seconds) before drifting free by accident.
+        current_ref_states = self._resolve_turn_around(ref_states)
+        current_refs = current_ref_states.reshape(-1).tolist()
 
         ### Complementary restrictions for velocity and angular velocity ###
         # This must run *before* "Get reference velocities" below: it is the only
@@ -495,33 +669,94 @@ class TrajectoryTracker:
         # unconditionally resets the mode to 'work' at the start of every tick, it
         # never got read at all.
         # speed_decay = 0.0
-        current_ref_theta = math.degrees(ref_states[0, 2]) % 360
-        current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
+        current_ref_theta = math.degrees(current_ref_states[0, 2]) % 360
+        current_ref_theta_last = math.degrees(current_ref_states[-1, 2]) % 360
         current_theta = math.degrees(self.state[2]) % 360
         theta_diff = float(self.angle_diff(current_ref_theta, current_theta))
         theta_diff_last = float(self.angle_diff(current_ref_theta_last, current_theta))
+        # The heading 'aligning' actually turns to -- see `_dominant_ref_theta`.
+        align_target_theta = self._dominant_ref_theta(current_ref_states)
+        align_target_deg = math.degrees(align_target_theta) % 360
+        theta_diff_target = float(self.angle_diff(align_target_deg, current_theta))
         if self.vb:
             print(f"[AligningDebug-{self.robot_id}] pos=({self.state[0]:.4f},{self.state[1]:.4f}) "
                   f"current_theta={current_theta:.2f} current_ref_theta={current_ref_theta:.2f} "
-                  f"theta_diff={theta_diff:.2f}")
+                  f"theta_diff={theta_diff:.2f} align_target={align_target_deg:.2f} "
+                  f"theta_diff_target={theta_diff_target:.2f}")
         # if (theta_diff := (abs(current_ref_theta - current_theta) % 180)) > 120:
         #     self.set_work_mode(mode='aligning')
         # elif theta_diff > 60:
         #     speed_decay = min(max(theta_diff/180, 0.0), 1.0)
         #     self.set_work_mode(mode='work', use_predefined_speed=False)
 
-        # Hysteresis: enter 'aligining' at a large error (100 degrees) but only leave
+        # Hysteresis: enter 'aligining' at a large error (60 degrees) but only leave
         # it once the correction is essentially complete (20 degrees) -- a single
-        # symmetric threshold let the heading hover right around 100 degrees
-        # indefinitely instead of ever finishing the turn.
+        # symmetric threshold let the heading hover right around the entry angle
+        # indefinitely instead of ever finishing the turn. 60, not 90 or 100: 'work'
+        # mode's per-step heading cost (qtheta in config/mpc_*.yaml) is 0 -- it applies
+        # no corrective torque toward the reference heading at all, relying entirely on
+        # aligining to fix large errors. This is a grid roadmap, so a corner is commonly
+        # a ~90-degree jump in the path's own heading; if that jump lands just under the
+        # entry threshold while already in 'work' mode (observed at 81.94 degrees with a
+        # 90-degree threshold), aligining never engages and, since 'work' supplies no
+        # heading correction of its own, the error persists indefinitely -- the robot
+        # cruises the rest of its path pointed the wrong way. 60 degrees clears any
+        # 90-degree grid corner with margin while keeping a healthy 40-degree gap above
+        # the 20-degree exit, so hysteresis still can't chatter.
+        #
+        # Entry is judged against *both* the reference heading at the robot's own docking
+        # point and the dominant heading, exit against the dominant heading alone. That
+        # asymmetry is deliberate: entry must stay keyed on `current_ref_theta` so a robot
+        # merely approaching a corner (dominant heading already post-corner, but the corner
+        # still metres ahead) does not pivot early and cut it, while exit must be keyed on
+        # the heading the solver is actually being driven to, or the mode can never end.
+        # Requiring the dominant heading to disagree as well is what stops the two tests
+        # from chattering right after an alignment finishes: the reference cannot advance
+        # until the robot moves, so `current_ref_theta` is still the stale pre-turn heading
+        # on the tick after the turn completes.
         aligning_exit_theta = 20
+        if self._aligning_cooldown > 0:
+            self._aligning_cooldown -= 1
         if self._mode == 'aligning':
-            if theta_diff < aligning_exit_theta:
-                self.set_work_mode(mode='work', use_predefined_speed=False)
-        elif theta_diff > 100:  # and theta_diff_last > 90:
+            self._aligning_ticks += 1
+            if theta_diff_target < aligning_exit_theta:
+                self._leave_aligning()
+            elif self._aligning_ticks > self._aligning_tick_limit:
+                # Watchdog: 'aligning' pins base_speed at 0, so a mode that never reaches
+                # its exit condition is a permanent freeze rather than a slow run. Nothing
+                # legitimate takes longer than two full revolutions at `ang_vel_max`.
+                print(f"[{self.__class__.__name__}-{self.robot_id}] Aligining watchdog: "
+                      f"{self._aligning_ticks} ticks without reaching {align_target_deg:.1f} deg "
+                      f"(heading {current_theta:.1f} deg, error {theta_diff_target:.1f} deg). "
+                      f"Leaving aligining so the robot can move again.")
+                self._leave_aligning()
+                self._aligning_cooldown = self._aligning_tick_limit
+        elif theta_diff > 60 and theta_diff_target > 60 and self._aligning_cooldown == 0:
             self.set_work_mode(mode='aligning')
         else:
-            self.set_work_mode(mode='work', use_predefined_speed=False)
+            self._leave_aligning()
+        if self._mode != 'aligning':
+            self._aligning_ticks = 0
+
+        ### Make the aligning reference self-consistent ###
+        # `aligning` sets qtheta to 100, and the solver applies that weight to *every*
+        # reference sample in the horizon, not just the first. Where the horizon straddles a
+        # corner the reference headings are bimodal, and the cost minimum is the weighted
+        # compromise between the two modes -- a heading that matches neither. Measured on
+        # `test_2`/PANOC at A1's v15 corner: 2 samples asking 0.49 deg and 13 asking 211.62
+        # deg, solver optimum 277.64 deg, 82 deg away from the exit test's target and 66 deg
+        # away from the outgoing heading, with the solved controls decaying to zero. Since
+        # base_speed is 0 the robot cannot move, so the planner's docking index cannot
+        # advance, so the reference cannot change: the robot froze 0.92 m short of v15 and
+        # stayed there until TIMEOUT. Flattening the horizon's headings onto the single
+        # target the mode is testing against gives the heading cost a unique minimum at that
+        # target, so the mode always reaches its exit condition. Reference *positions* are
+        # left alone -- their weights are two orders of magnitude below qtheta here and they
+        # still hold the robot on the path while it turns.
+        if self._mode == 'aligning':
+            current_ref_states = np.array(current_ref_states, dtype=float, copy=True)
+            current_ref_states[:, 2] = align_target_theta
+            current_refs = current_ref_states.reshape(-1).tolist()
 
         ### Get reference velocities ###
         dist_to_goal = math.hypot(self.state[0]-self.final_goal[0], self.state[1]-self.final_goal[1]) # change ref speed if final goal close
@@ -534,23 +769,10 @@ class TrajectoryTracker:
 
         last_u = self.past_actions[-1] if len(self.past_actions) else np.zeros(self.nu)
 
-        ### Check if turning around ###
-        mid_idx = 0
-        ref_theta_diff = float(self.angle_diff(current_ref_theta, current_ref_theta_last))
-        if (ref_theta_diff > 170):
-            all_ref_thetas = np.degrees(ref_states[:, 2]) % 360
-            all_theta_diffs = self.angle_diff(all_ref_thetas, current_theta)
-            try:
-                turn_idx = np.where(all_theta_diffs>170)[0][0]
-            except IndexError:
-                turn_idx = self.N_hor - 1 # if no turn found, use the last index
-            if turn_idx < mid_idx: # prioritize turning around
-                current_refs = np.vstack(( np.tile(ref_states[[turn_idx], :], (turn_idx+1, 1)), ref_states[turn_idx+1:, :] )).reshape(-1).tolist()
-                self.set_work_mode(mode='aligning')
-            else: # prioritize going straight
-                current_refs = np.vstack(( ref_states[:turn_idx, :], np.tile(ref_states[[turn_idx], :], (self.N_hor-turn_idx, 1)) )).reshape(-1).tolist()
+        # NOTE: the path-reversal handling that used to sit here now runs *before* the mode
+        # decision above, in `_resolve_turn_around`. See the comment at its call site.
         assert len(current_refs) == self.ns * self.N_hor, f"Reference states should have {self.ns * self.N_hor} elements, got {len(current_refs)}."
-            
+
         ### Assemble parameters for solver & Run MPC ###
         params = list(last_u) + list(self.state) + list(finish_state) + self.tuning_params + \
                  current_refs + speed_ref_list + other_robot_states + \
@@ -558,7 +780,20 @@ class TrajectoryTracker:
 
         try:
             # self.solver_debug(stc_constraints) # use to check (visualize) the environment
-            taken_states, pred_states, actions, cost, solver_time, exit_status, u = self.run_solver(params, self.state, self.config.action_steps, initial_guess=self._init_guess)
+            # Aligining mode gets its own initial guess rather than the shifted warm start
+            # from whatever solve preceded it: a large heading error means "spin toward the
+            # target" is the qualitatively obvious answer, but a stale or all-zero guess gives
+            # IPOPT no directional bias, and once its own previous solve has settled toward
+            # near-stationary controls (e.g. after a partial correction, or carried over from
+            # 'work' mode's very different cost), warm-starting from that repeatedly re-finds
+            # the same "stay put" local optimum instead of the intended full turn -- observed
+            # directly as theta_diff plateauing well short of the target for hundreds of ticks
+            # with the applied controls converging to ~0. Seeding a guess that already spins
+            # the right way resolves it.
+            init_guess = self._init_guess
+            if self._mode == 'aligning':
+                init_guess = self._build_aligning_warm_start(align_target_theta)
+            taken_states, pred_states, actions, cost, solver_time, exit_status, u = self.run_solver(params, self.state, self.config.action_steps, initial_guess=init_guess)
             # actions = [x*np.array([1.0-speed_decay, 1.0]) for x in actions]
             if exit_status in self.config.bad_exit_codes and self.vb:
                 print(f"[{self.__class__.__name__}-{self.robot_id}] Bad converge status: {exit_status}")
@@ -795,6 +1030,32 @@ class TrajectoryTracker:
             theta_anchor = rebranched[theta_idx]
         return rebranched
 
+    def _build_aligning_warm_start(self, target_theta: float) -> list[float]:
+        """Build a directed initial guess for aligining mode: spin toward target_theta
+        at max angular velocity, holding position and linear speed at zero.
+
+        A cold (all-zero) or shifted guess gives the solver no directional bias, and once
+        the previous solve has already settled toward near-zero controls -- e.g. after a
+        partial correction, or carried over from 'work' mode's very different cost -- warm
+        starting from it keeps re-finding that same "stay put" local optimum instead of
+        completing the turn: theta_diff plateaus well short of the target for hundreds of
+        ticks with the applied controls converging to ~0, confirmed independent of
+        obstacles. Seeding a guess that already spins the right way avoids that trap.
+        """
+        current_theta = float(self.state[2])
+        direction = 1.0 if self.wrap_to_pi(target_theta - current_theta) >= 0 else -1.0
+        w = direction * self.robot_spec.ang_vel_max
+        u_init = [0.0, w] * self.N_hor
+
+        if self.solver_type == 'Casadi':
+            x_init: list[float] = []
+            theta = current_theta
+            for _ in range(self.N_hor + 1):
+                x_init += [float(self.state[0]), float(self.state[1]), theta]
+                theta += w * self.ts
+            return x_init + u_init
+        return u_init
+
     @staticmethod
     def lineseg_dists(points: np.ndarray, line_points_1: np.ndarray, line_points_2: np.ndarray) -> np.ndarray:
         """Cartesian distance from point to line segment.
@@ -870,25 +1131,13 @@ class TrajectoryTracker:
             ref_speed = self.base_speed
 
         ### Check if turning around ###
-        current_ref_theta = math.degrees(ref_states[0, 2]) % 360
-        current_ref_theta_last = math.degrees(ref_states[-1, 2]) % 360
-        current_theta = math.degrees(self.state[2]) % 360
-        mid_idx = 3
-        ref_theta_diff = float(self.angle_diff(current_ref_theta, current_ref_theta_last))
-        if (ref_theta_diff > 170):
-            all_ref_thetas = np.degrees(ref_states[:, 2]) % 360
-            all_theta_diffs = self.angle_diff(all_ref_thetas, current_theta)
-            try:
-                turn_idx = np.where(all_theta_diffs>150)[0][0]
-            except IndexError:
-                turn_idx = self.N_hor - 1 # if no turn found, use the last index
-            if turn_idx < mid_idx: # prioritize turning around
-                current_refs = np.vstack(( np.tile(ref_states[[turn_idx], :], (turn_idx+1, 1)), ref_states[turn_idx+1:, :] ))
-                self.set_work_mode(mode='aligning')
-            else: # prioritize going straight
-                current_refs = np.vstack(( ref_states[:turn_idx, :], np.tile(ref_states[[turn_idx], :], (self.N_hor-turn_idx, 1)) ))
-        else:
-            current_refs = ref_states
+        # Shared with the NMPC path so both trackers fold a reversed reference the same way.
+        # Note this no longer switches to 'aligning' mode: doing so zeroed `base_speed`, and
+        # since `set_ref_states` will not write `base_speed` while the mode is 'aligning' and
+        # nothing on the naive path ever leaves that mode, the speed reference stayed at 0
+        # for the rest of the run. The proportional law below already handles a reversal on
+        # its own -- it cuts the speed to 10% whenever the heading error exceeds 60 degrees.
+        current_refs = self._resolve_turn_around(ref_states)
 
         dists = np.linalg.norm(current_refs[:, :2] - self.state[:2], axis=1)
         idx = int(np.argmin(dists))

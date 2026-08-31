@@ -5,6 +5,8 @@ import datetime
 
 import numpy as np
 import pandas as pd # type: ignore
+from shapely.geometry import Point, Polygon # type: ignore
+from shapely.ops import unary_union # type: ignore
 
 from basic_motion_model.motion_model import UnicycleModel
 
@@ -73,7 +75,125 @@ def resolve_mpc_backend(config_mpc: MpcConfiguration, mpc_backend=None, root_dir
     return config_mpc.solver_type
 
 
-def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, recording=False, mpc_backend=None):
+class StaticCollisionChecker:
+    """Distance from a robot's centre to the nearest static obstacle surface or wall.
+
+    Built from the *un-inflated* map, so what it returns is physical geometry rather
+    than the planning-time inflation the MPC sees: a circular robot of radius `r`
+    centred at `(x, y)` overlaps something static exactly when `min_distance(x, y) < r`.
+    The value is negative when the centre is already inside an obstacle or outside the
+    map boundary, so a deep overlap reads as a large negative number.
+    """
+
+    def __init__(self, boundary_coords, obstacle_coords_list):
+        polygons = []
+        for coords in (obstacle_coords_list or []):
+            if coords is None or len(coords) < 3:
+                continue
+            poly = Polygon(coords)
+            if not poly.is_valid:
+                poly = poly.buffer(0) # self-intersecting rings are common in hand-drawn maps
+            if not poly.is_empty:
+                polygons.append(poly)
+        self._obstacles = unary_union(polygons) if polygons else None
+
+        self._boundary = None
+        if boundary_coords is not None and len(boundary_coords) >= 3:
+            boundary = Polygon(boundary_coords)
+            if not boundary.is_valid:
+                boundary = boundary.buffer(0)
+            if not boundary.is_empty:
+                self._boundary = boundary
+
+    @property
+    def active(self) -> bool:
+        """False if the map carried neither obstacles nor a usable boundary."""
+        return self._obstacles is not None or self._boundary is not None
+
+    def min_distance(self, x: float, y: float) -> float:
+        """Signed distance from `(x, y)` to the nearest obstacle surface or wall."""
+        point = Point(float(x), float(y))
+        distance = float('inf')
+        if self._obstacles is not None:
+            d_obs = point.distance(self._obstacles.boundary)
+            if self._obstacles.contains(point):
+                d_obs = -d_obs
+            distance = min(distance, d_obs)
+        if self._boundary is not None:
+            d_bnd = point.distance(self._boundary.exterior)
+            if not self._boundary.contains(point):
+                d_bnd = -d_bnd
+            distance = min(distance, d_bnd)
+        return distance
+
+
+def relax_final_eta(path_coords, path_times, lin_vel_max):
+    """Replace a sentinel "no deadline" ETA on the last node with a reachable one.
+
+    `sp_comsat` marks the final depot visit with the instance's `Big_number` (50000 in
+    `test_7`'s schedule.csv, against a makespan of ~340), meaning "there is no deadline for
+    going home". `LocalTrajPlanner` cannot read it that way: its reference speed is
+    `distance_to_next_node / (ETA - t)`, so an ETA 50000 s away yields ~1e-4 m/s, and
+    `downsample_ref_states` -- which rescales the horizon by ref_speed/nominal_speed --
+    then squeezes the whole 4.2 m horizon down to a fraction of a millimetre. Every
+    reference point collapses onto the robot's current docking point, `run_mpc`'s
+    "within 0.3 m of the last reference" guard below suppresses `robot.step` permanently,
+    and because the docking index only advances with the robot's position the reference can
+    never move again. Measured on `test_7`/PANOC: A2 and A3 arrested mid-corridor at ticks
+    1056 and 947 -- 5.7 m short of their final node -- and stood still until TIMEOUT. That is
+    the reported "it simply freezes".
+
+    Nothing is scheduled after the final node, so arriving there as early as the robot can is
+    always admissible; `min` guarantees this only ever brings the last ETA forward, never
+    delays it, so a schedule with a genuine (finite) final deadline is left untouched.
+    """
+    if not path_times or len(path_times) < 2 or len(path_coords) != len(path_times):
+        return path_times
+    leg = float(np.hypot(path_coords[-1][0]-path_coords[-2][0], path_coords[-1][1]-path_coords[-2][1]))
+    reachable = float(path_times[-2]) + leg/float(lin_vel_max)
+    path_times = list(path_times)
+    path_times[-1] = min(float(path_times[-1]), reachable)
+    return path_times
+
+
+def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, recording=False, mpc_backend=None,
+            headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0, stuck_eps=0.02,
+            stuck_arrival_tol=0.3, collision_check=True, collision_margin=0.0):
+    """Run the MPC simulation loop.
+
+    Args:
+        headless: If True, skip the matplotlib live plotter (and its blocking "press
+            anything to finish" prompt) entirely, so the whole pipeline can run
+            non-interactively -- e.g. from a script or CI -- and simply return a result.
+        late_threshold_s: A robot is declared failed ("late") once it is still short of
+            the node it is currently targeting more than this many seconds past that
+            node's scheduled ETA. Pass None or False to disable the check.
+        stuck_timeout_s: A robot is declared failed ("stuck") once it has not moved
+            (translated) more than `stuck_eps` for this many consecutive seconds while
+            not idle, not in the `aligning` work mode (which legitimately rotates in
+            place), and more than `stuck_arrival_tol` away from the node it is currently
+            targeting -- a robot parked at/near a node it already reached (e.g. waiting
+            out a recharge or a time-window/precedence gap) is not stuck. Pass None or
+            False to disable the check.
+        stuck_eps: Minimum position change (metres) between ticks to count as "moved".
+        stuck_arrival_tol: Distance (metres) to the current target node within which the
+            robot is considered "arrived" and therefore exempt from the stuck check.
+        collision_check: If True, the run fails ("collision") as soon as two robot bodies
+            overlap, or a robot body overlaps a static obstacle or leaves the map
+            boundary. Robots are treated as discs of radius `vehicle_width` and the test
+            uses the *un-inflated* map, so this reports physical contact, not a breach of
+            the planner's safety margin. Pass False (or None) to disable the check.
+        collision_margin: Extra clearance (metres) a robot must keep on top of its own
+            body radius before the check trips. 0.0 (the default) means bodies must
+            actually touch; a positive value fails the run on near-misses, e.g. 0.1 flags
+            any pass closer than 10 cm. Ignored when `collision_check` is off.
+
+    Returns:
+        A dict: {"status": "success"|"late"|"stuck"|"collision"|"timeout", "failure": dict
+        or None, "ticks": int, "time": float, "actual_schedule_path": str}. "timeout" means
+        the simulation ran out its full tick budget (`TIMEOUT`) without every robot
+        finishing and without tripping a late/stuck/collision failure.
+    """
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
     CFG_FNAME = "mpc_default.yaml" # "mpc_default.yaml" or "mpc_fast.yaml"
@@ -82,6 +202,13 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
     VERBOSE = False
     TIMEOUT = 10000
+
+    # `False` is accepted as a synonym for `None` ("disable this check") since callers
+    # naturally reach for it as the off-switch for a threshold.
+    late_threshold_s = None if late_threshold_s in (None, False) else late_threshold_s
+    stuck_timeout_s = None if stuck_timeout_s in (None, False) else stuck_timeout_s
+    collision_check = bool(collision_check) # None/False both mean "off"
+    collision_margin = 0.0 if collision_margin is None else float(collision_margin)
 
     if recording:
         save_video_path = f'./Demo/{DATA_NAME}_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.mp4'
@@ -135,31 +262,47 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
         robot_manager.add_robot(robot, controller, planner, visualizer)
 
         path_coords, path_times = gpc.get_robot_schedule(rid)
+        path_times = relax_final_eta(path_coords, path_times, config_robot.lin_vel_max)
         robot_manager.add_schedule(rid, np.asarray(robot_starts[str(rid)]), path_coords, path_times)
 
     ### Run
-    map_width  = max(np.asarray(boundary_coords)[:, 0]) - min(np.asarray(boundary_coords)[:, 0])
-    map_height = max(np.asarray(boundary_coords)[:, 1]) - min(np.asarray(boundary_coords)[:, 1])
-    save_params = {'skip_frame': 0, 'frame_size': (1280, int(map_height/map_width * 1280)), 'dpi': 300}
-    main_plotter = MpcPlotInLoop(config_robot, map_only=MAP_ONLY, fig_ratio=(map_width/map_height), save_to_path=save_video_path, save_params=save_params)
-    # main_plotter.plot_in_loop_pre(gpc.current_map, gpc.inflated_map, gpc.current_graph)
-    main_plotter.plot_in_loop_pre(gpc.current_map, graph_manager=gpc.current_graph)
-    color_list = [
-        "#0072B2", "#D55E00", "#009E73", "#F0E442", "#56B4E9",
-        "#E69F00", "#CC79A7",
-    ]
-    for i, rid in enumerate(robot_ids):
-        planner = robot_manager.get_planner(rid)
-        controller = robot_manager.get_controller(rid)
-        visualizer = robot_manager.get_visualizer(rid)
-        main_plotter.add_object_to_pre(rid,
-                                       None, #planner.ref_traj,
-                                       controller.state,
-                                       controller.final_goal,
-                                       color=color_list[i % len(color_list)])
-        visualizer.plot(main_plotter.map_ax, *robot.state)
+    main_plotter = None
+    if not headless:
+        map_width  = max(np.asarray(boundary_coords)[:, 0]) - min(np.asarray(boundary_coords)[:, 0])
+        map_height = max(np.asarray(boundary_coords)[:, 1]) - min(np.asarray(boundary_coords)[:, 1])
+        save_params = {'skip_frame': 0, 'frame_size': (1280, int(map_height/map_width * 1280)), 'dpi': 300}
+        main_plotter = MpcPlotInLoop(config_robot, map_only=MAP_ONLY, fig_ratio=(map_width/map_height), save_to_path=save_video_path, save_params=save_params)
+        # main_plotter.plot_in_loop_pre(gpc.current_map, gpc.inflated_map, gpc.current_graph)
+        main_plotter.plot_in_loop_pre(gpc.current_map, graph_manager=gpc.current_graph)
+        color_list = [
+            "#0072B2", "#D55E00", "#009E73", "#F0E442", "#56B4E9",
+            "#E69F00", "#CC79A7",
+        ]
+        for i, rid in enumerate(robot_ids):
+            planner = robot_manager.get_planner(rid)
+            controller = robot_manager.get_controller(rid)
+            visualizer = robot_manager.get_visualizer(rid)
+            main_plotter.add_object_to_pre(rid,
+                                           None, #planner.ref_traj,
+                                           controller.state,
+                                           controller.final_goal,
+                                           color=color_list[i % len(color_list)])
+            visualizer.plot(main_plotter.map_ax, *robot.state)
 
     actual_timetable = {rid: [] for rid in robot_ids}
+    last_pos = {rid: None for rid in robot_ids}
+    stuck_ticks = {rid: 0 for rid in robot_ids}
+    failure = None
+
+    ### Collision detection works on the raw map, not `gpc.inflated_map`/`static_obstacles`:
+    ### the latter is already grown by vehicle_width+vehicle_margin for the planner, so a
+    ### robot touching it is merely inside its safety margin, not in contact with anything.
+    collision_checker = None
+    if collision_check:
+        collision_checker = StaticCollisionChecker(gpc.current_map.boundary_coords,
+                                                   gpc.current_map.obstacle_coords_list)
+        print(f"[run_mpc] Collision detection on (robot radius {config_robot.vehicle_width:.3f} m, "
+              f"margin {collision_margin:.3f} m)")
 
     for kt in range(TIMEOUT):
         robot_states = []
@@ -174,14 +317,32 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
             other_robot_states = robot_manager.get_other_robot_states(rid, config_mpc)
 
             if controller.idle:
-                main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
+                if not headless:
+                    main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
                 continue
             
+            # `idx_check_range` is how many base-trajectory samples ahead of the current
+            # docking point the planner may look for the sample nearest the robot, and the
+            # docking index never regresses -- so it is also the furthest the reference can
+            # advance in one tick. Samples are `lin_vel_max*ts` apart, so the old value of 5
+            # gave 1.2 m of path lookahead. That is less than the path a robot skips when it
+            # cuts a sharp corner: at `test_2`'s v15 (a 149-degree turn) A1 rounded the
+            # corner 0.07 m from the outgoing edge but 3.1 m further along the path than the
+            # docking point, so every sample in the window was further away than the docking
+            # point itself, the reference stayed pinned behind the robot, and the MPC settled
+            # on standing still -- moving forward only increased the reference-path-deviation
+            # cost. One MPC horizon of lookahead covers the skip, and matches the length of
+            # reference the controller is tracking anyway; `LocalTrajPlanner` truncates the
+            # window at a path reversal so the wider range cannot jump a dead-end detour.
             ref_states, ref_speed, *_ = planner.get_local_ref(
                 kt*config_mpc.ts, 
                 (float(robot.state[0]), float(robot.state[1])), 
-                idx_check_range=5,
-                ignore_speed_ref=ignore_speed_ref
+                idx_check_range=config_mpc.N_hor,
+                ignore_speed_ref=ignore_speed_ref,
+                # The reversal guard in `LocalTrajPlanner` needs the heading to tell an
+                # outbound leg from the inbound one that retraces it; without it the docking
+                # index cannot cross a dead-end turnaround at all.
+                current_heading=float(robot.state[2])
             )
             print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
             controller.set_current_state(robot.state)
@@ -205,27 +366,104 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                 actual_timetable[rid][-1] = (kt*config_mpc.ts, gpc.get_node_id(planner._current_target_node))
 
             ### Real run
+            # controller.run_step re-solves every tick (this loop calls it once per kt,
+            # never batching config_mpc.action_steps real ticks per solve), so exactly one
+            # physical step happens per solve. `actions` holds action_steps planned control
+            # pairs from that one solve; actions[-1] is the *last* of them -- e.g. the 3rd of
+            # 3 when action_steps=3 -- which is whatever the solver settled the trajectory
+            # into several planning steps out, not what it computed for right now. With
+            # action_steps=1 (configs.py's documented "normal" value) actions[-1] and
+            # actions[0] are the same element, which is why this went unnoticed; at
+            # action_steps=3 the two consistently differ, and actions[-1] is frequently near
+            # zero even when actions[0] calls for a large correction (e.g. mid-turn), stalling
+            # the robot. Apply actions[0], the control the solve computed for this tick.
             if (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.3) or controller._mode == 'aligning':
                 if controller._mode != 'safe' or (np.linalg.norm(robot.state[:2] - current_refs[-1][:2]) > 0.8) or planner.idle:
-                    robot.step(actions[-1])
+                    robot.step(actions[0])
             robot_manager.set_pred_states(rid, np.asarray(pred_states))
 
-            main_plotter.update_plot(rid, kt, actions[-1], None, debug_info['cost'], np.asarray(pred_states), current_refs)
-            visualizer.update(*robot.state)
+            if not headless:
+                main_plotter.update_plot(rid, kt, actions[0], None, debug_info['cost'], np.asarray(pred_states), current_refs)
+                visualizer.update(*robot.state)
 
             if not controller.check_termination_condition(external_check=planner.idle):
                 incomplete = True
 
             robot_states.append(robot.state)
 
-        main_plotter.plot_in_loop(time=kt*config_mpc.ts, autorun=AUTORUN, zoom_in=None)
+            ### Failure detection: a robot is "stuck" if it has not moved for
+            ### stuck_timeout_s while active, not merely rotating in place during
+            ### `aligning`, and still more than stuck_arrival_tol from the node it is
+            ### targeting -- a robot parked at/near a node it already reached (e.g.
+            ### waiting out a recharge or a time-window/precedence gap) is not stuck.
+            ### "late" fires if a robot is still short of its current target node more
+            ### than late_threshold_s past that node's scheduled ETA.
+            pos = np.asarray(robot.state[:2], dtype=float)
+            target_node = planner.current_target_node
+            dist_to_target = float(np.hypot(pos[0]-target_node[0], pos[1]-target_node[1]))
+            if (stuck_timeout_s is not None and last_pos[rid] is not None
+                    and controller._mode != 'aligning'
+                    and dist_to_target > stuck_arrival_tol
+                    and np.linalg.norm(pos - last_pos[rid]) < stuck_eps):
+                stuck_ticks[rid] += 1
+            else:
+                stuck_ticks[rid] = 0
+            last_pos[rid] = pos
+            if stuck_timeout_s is not None and stuck_ticks[rid]*config_mpc.ts > stuck_timeout_s:
+                failure = {"type": "stuck", "robot_id": rid, "time": kt*config_mpc.ts,
+                           "stuck_for_s": stuck_ticks[rid]*config_mpc.ts}
+
+            eta = planner.current_target_eta
+            if late_threshold_s is not None and eta is not None and (kt*config_mpc.ts - eta) > late_threshold_s:
+                failure = {"type": "late", "robot_id": rid, "time": kt*config_mpc.ts,
+                           "scheduled_eta": eta, "lateness_s": kt*config_mpc.ts - eta}
+
+            ### "collision" (part 1 of 2): this robot's body against the static world --
+            ### obstacles and the map boundary. `clearance` is the gap between the robot's
+            ### circumference and the nearest wall surface; negative means overlap.
+            if collision_checker is not None and collision_checker.active:
+                clearance = collision_checker.min_distance(pos[0], pos[1]) - config_robot.vehicle_width
+                if clearance < collision_margin:
+                    failure = {"type": "collision", "with": "obstacle", "robot_id": rid,
+                               "time": kt*config_mpc.ts, "position": [float(pos[0]), float(pos[1])],
+                               "clearance_m": clearance, "required_clearance_m": collision_margin}
+
+            if failure is not None:
+                break
+
+        ### "collision" (part 2 of 2): robot against robot. This runs outside the per-robot
+        ### loop because it needs every robot's post-step position, including robots that
+        ### are idle (they `continue` above, but a robot parked on the path of another is
+        ### still something to hit).
+        if failure is None and collision_check:
+            min_separation = 2*config_robot.vehicle_width + collision_margin
+            positions = {rid: np.asarray(robot_manager.get_robot(rid).state[:2], dtype=float)
+                         for rid in robot_ids}
+            for i, rid_a in enumerate(robot_ids):
+                for rid_b in robot_ids[i+1:]:
+                    separation = float(np.linalg.norm(positions[rid_a] - positions[rid_b]))
+                    if separation < min_separation:
+                        failure = {"type": "collision", "with": "robot",
+                                   "robot_ids": [rid_a, rid_b], "time": kt*config_mpc.ts,
+                                   "distance_m": separation, "min_distance_m": min_separation,
+                                   "overlap_m": min_separation - separation}
+                        break
+                if failure is not None:
+                    break
+
+        if not headless:
+            main_plotter.plot_in_loop(time=kt*config_mpc.ts, autorun=AUTORUN, zoom_in=None)
+        if failure is not None:
+            print(f"[run_mpc] FAILURE detected: {failure}")
+            break
         if not incomplete:
             break
 
 
-    main_plotter.show()
-    input('Press anything to finish!')
-    main_plotter.close()
+    if not headless:
+        main_plotter.show()
+        input('Press anything to finish!')
+        main_plotter.close()
 
     # Convert actual_timetable to DataFrame and save to CSV
     rows = []
@@ -242,7 +480,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     actual_df.to_csv(actual_schedule_path, index=False)
     print(f"Actual schedule saved to: {actual_schedule_path}")
 
-    if MONITOR_COST: # XXX
+    if MONITOR_COST and not headless: # XXX
         import matplotlib.pyplot as plt # type: ignore
         fig, ax = plt.subplots(1, 1)
         solve_time = controller.solver_time_timelist
@@ -251,4 +489,19 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
         ax.legend()
         plt.show()
 
-    return None
+    if failure is not None:
+        status = failure["type"]
+    elif incomplete:
+        status = "timeout"
+    else:
+        status = "success"
+
+    result = {
+        "status": status,
+        "failure": failure,
+        "ticks": kt,
+        "time": kt*config_mpc.ts,
+        "actual_schedule_path": actual_schedule_path,
+    }
+    print(f"[run_mpc] Result: status={status}, ticks={kt}, time={kt*config_mpc.ts:.2f}s")
+    return result

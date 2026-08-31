@@ -862,8 +862,9 @@ def _movingai_scenario_path(map_dir: pathlib.Path, scenario) -> pathlib.Path:
         scenario = f"{scenario}.scen"
     direct = map_dir / scenario
     if direct.is_file():
+        print('direct')
         return direct
-    return map_dir / "scenarios" / scenario
+    return map_dir / "scenarios" / f'{map_dir.name}-{scenario}'
 
 
 def convert_movingai(map_name: str, scenario, n_agents: int, out_name: str, method: str = "sampled",

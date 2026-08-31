@@ -2,7 +2,7 @@
 ts: 0.2   # Size of the time-step (sampling time)
 
 ### Robot Specification (physical shape)
-vehicle_width:  0.5  # Vehicle width in meters
+vehicle_width:  0.35355  # Vehicle width in meters
 vehicle_margin: 0.2  # Vehicle extra safe margin
 social_margin: 0.2   # Vehicle extra social margin for soft loss terms
 

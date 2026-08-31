@@ -76,6 +76,14 @@ class LocalTrajPlanner:
         return self._ref_speed
     
     @property
+    def current_target_eta(self) -> Optional[float]:
+        """Scheduled arrival time for the node currently being targeted, or None if the loaded path carries no ETAs."""
+        if self._ref_path_time is None:
+            return None
+        assert self._current_target_node_idx is not None
+        return self._ref_path_time[self._current_target_node_idx]
+
+    @property
     def docking_point(self) -> tuple:
         assert self._base_traj is not None
         assert self._base_traj_docking_idx is not None
@@ -98,6 +106,12 @@ class LocalTrajPlanner:
         """
         n_states = original_states.shape[0]
         distances = np.cumsum(np.sqrt(np.sum(np.diff(original_states[:, :2], axis=0)**2, axis=1))) # distance traveled along the path at each point
+        if n_states < 2 or distances[-1] <= 0.0:
+            # Zero-length reference: at the very end of the base trajectory the horizon is
+            # padded with copies of the last point, so every arc-length is 0 and the
+            # normalisation below would divide by zero -- producing an all-NaN reference that
+            # the solver silently turns into garbage actions. There is nothing to resample.
+            return original_states
         distances = np.insert(distances, 0, 0)/distances[-1] # normalize distances to [0, 1]
         fx = interpolate.interp1d(distances, original_states[:, 0], kind='linear')
         fy = interpolate.interp1d(distances, original_states[:, 1], kind='linear')
@@ -136,12 +150,16 @@ class LocalTrajPlanner:
 
         self._idle = False
 
-    def get_local_ref(self, current_time: float, current_pos: PathNode, idx_check_range:int=10, external_ref_speed:Optional[float]=None, ignore_speed_ref:bool=False):
+    def get_local_ref(self, current_time: float, current_pos: PathNode, idx_check_range:int=10,
+                      external_ref_speed:Optional[float]=None, ignore_speed_ref:bool=False,
+                      current_heading:Optional[float]=None):
         """Get the local reference from the current time and position.
 
         Args:
             idx_check_range: For linear sampling, the range of the index to check the docking point.
             external_ref_speed: The external reference speed used for resampling the reference states.
+            current_heading: The robot's current heading in radians. Optional, but without it a
+                path reversal cannot be crossed -- see `_reversal_bound`.
 
         Raises:
             ValueError: Sampling method not supported.
@@ -154,7 +172,7 @@ class LocalTrajPlanner:
         if self._sampling_method == 'time':
             ref_states, ref_speed, done = self.get_local_ref_from_time_sampling(current_time)
         elif self._sampling_method == 'linear':
-            ref_states, ref_speed, done = self.get_local_ref_from_linear_sampling(current_time, current_pos, idx_check_range)
+            ref_states, ref_speed, done = self.get_local_ref_from_linear_sampling(current_time, current_pos, idx_check_range, current_heading)
         else:
             raise ValueError('Sampling method not supported.')
         if ignore_speed_ref:
@@ -167,12 +185,15 @@ class LocalTrajPlanner:
             self._idle = True
         return ref_states, ref_speed, done
 
-    def get_local_ref_from_linear_sampling(self, current_time: float, current_pos: PathNode, idx_check_range:int=10):
+    def get_local_ref_from_linear_sampling(self, current_time: float, current_pos: PathNode,
+                                           idx_check_range:int=10, current_heading:Optional[float]=None):
         """The local planner takes the current position as input, and outputs the local reference.
 
         Args:
             current_pos: The current position of the agent (robot).
             idx_check_range: The range of the index to check the docking point.
+            current_heading: The robot's current heading in radians, used to decide whether a path
+                reversal ahead has already been executed. See `_reversal_bound`.
 
         Returns:
             ref_states: The local state reference.
@@ -198,7 +219,19 @@ class LocalTrajPlanner:
         # candidates within a small tolerance of the true nearest, keep the one
         # closest to the previous index instead of whichever wins the raw argmin.
         lb_idx = self._base_traj_docking_idx
-        ub_idx = min(self._base_traj_docking_idx+idx_check_range, len(self._base_traj)-1)
+        # `max(lb_idx+1, ...)`: once the docking index reaches the last sample the old cap of
+        # `len-1` made the slice below empty and `min()` raised ValueError. Keep at least the
+        # current sample in the window.
+        ub_idx = max(lb_idx+1, min(self._base_traj_docking_idx+idx_check_range, len(self._base_traj)-1))
+        # Never let the window reach across a path reversal the robot has not performed yet.
+        # Widening `idx_check_range` enough to round a sharp corner (see `run_mpc`, which now
+        # passes the MPC horizon) would otherwise let the docking index jump straight from the
+        # outbound leg of a dead-end detour to the inbound one -- the two legs retrace the same
+        # (x,y) samples, so a robot part-way out is genuinely nearest to an inbound sample, and
+        # the node at the dead end would be skipped without ever being visited. Which leg the
+        # robot is on is not decidable from position, only from heading, which is why
+        # `_reversal_bound` needs `current_heading`.
+        ub_idx = min(ub_idx, self._reversal_bound(lb_idx, current_heading))
 
         distances = [math.hypot(current_pos[0]-x[0], current_pos[1]-x[1]) for x in self._base_traj[lb_idx:ub_idx]]
         min_dist = min(distances)
@@ -234,6 +267,53 @@ class LocalTrajPlanner:
             done = False
 
         return ref_states, ref_speed, done
+
+    def _reversal_bound(self, lb_idx: int, current_heading: Optional[float]=None) -> int:
+        """Exclusive upper index for a docking search starting at `lb_idx`, stopping at a reversal.
+
+        A path reversal -- the robot drives to a dead end and comes straight back -- makes the
+        outbound and inbound samples share the same (x,y) positions with opposite headings, so
+        the nearest-sample search cannot tell them apart anywhere along the corridor. Bounding
+        the search at the reversal keeps it on the leg the robot is actually on.
+
+        Which leg that is depends on where the robot is *pointing*, not where it is. So when
+        `current_heading` is given, a reversal whose post-fold heading the robot is already
+        closer to counts as executed: the robot has turned around, the samples beyond the fold
+        are the ones ahead of it, and the search is allowed through (up to the next reversal it
+        has *not* performed). Without that release the docking index sticks one sample short of
+        the fold forever, because the trajectory generator places the first inbound sample
+        slightly *past* the last outbound one (`4Small`, A4: outbound ends at x=-19.8, the fold
+        sample sits at x=-19.9, and the inbound samples the robot actually drives over start at
+        x=-19.6, outside a window clamped to the fold). The robot then drove 2.6 m back east
+        with its reference pinned behind it and stalled.
+
+        With no `current_heading` the bound still admits one sample past the fold, which lets
+        the docking index at least reach the turning point; that is the most it can do blind.
+        """
+        assert self._base_traj is not None
+        theta_ref = self._base_traj[lb_idx][2]
+        scan_from = lb_idx
+        while True:
+            fold = None
+            for idx in range(scan_from+1, len(self._base_traj)):
+                if self._angle_gap(self._base_traj[idx][2], theta_ref) > math.radians(170):
+                    fold = idx
+                    break
+            if fold is None:
+                return len(self._base_traj)
+            if current_heading is None:
+                return fold + 1
+            theta_fold = self._base_traj[fold][2]
+            if self._angle_gap(current_heading, theta_fold) >= self._angle_gap(current_heading, theta_ref):
+                # Still pointing along the pre-fold leg: the reversal is ahead of the robot.
+                return fold + 1
+            theta_ref = theta_fold
+            scan_from = fold
+
+    @staticmethod
+    def _angle_gap(a: float, b: float) -> float:
+        """Absolute difference between two angles, wrapped into [0, pi]."""
+        return abs((a - b + math.pi) % (2*math.pi) - math.pi)
 
     def get_local_ref_from_time_sampling(self, current_time: float):
         """The local planner takes the current time as input, and outputs the local reference.

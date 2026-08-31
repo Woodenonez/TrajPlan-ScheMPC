@@ -1,6 +1,7 @@
 from pkg_sche.sp_comsat.support_functions import print_graph,json_parser
 import math
 import networkx as nx
+import sys
 
 def visualize_instance(problem,labels):
 # first of all, let's parse the json file with the plant layout and the tasks info
@@ -21,4 +22,4 @@ def visualize_instance(problem,labels):
 
 if __name__ == "__main__":
 
-    visualize_instance('test_6',False)
+    visualize_instance(sys.argv[1],False)

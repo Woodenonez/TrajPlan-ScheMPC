@@ -62,6 +62,25 @@ The loop: solve routing → try to schedule those routes → if the schedule is 
 
 `scheduling_model.py` has a hard-coded `if True:` / `else:` switch choosing between `Optimize()` (minimize time-window centering + waiting at nodes + total visit times) and a plain feasibility `Solver()`. This is an experiment toggle, not dead code — check which branch is active before interpreting results.
 
+**Open routes.** `E_Routing_Gurobi.routing` produces **open** routes: a vehicle leaves its depot
+('start' task) and simply stops at the last task it serves — it no longer drives back. The 'end'
+tasks that `support_functions.json_parser` still synthesizes per depot are now isolated in the
+routing graph (`no_travel_to_end`), and the old closure constraint is replaced by a binary
+`route_end[k, i]` — "vehicle `k` terminates at task `i`" — which enters flow conservation as
+`in(i) == out(i) + route_end[k, i]`. A terminus must be a real job visit, never a depot or a
+recharge dummy (which sits at a depot location anyway), and each vehicle that leaves its depot
+terminates exactly once. Dropping the return legs cuts total travelling distance substantially
+(4Small 336.0 → 238.0, 5Large 958.46 → 616.23).
+
+One downstream consequence to keep in mind: `scheduling_model.schedule` asserts
+`leave_node[last] == big_number`, i.e. a vehicle parks at its final node **forever**. With closed
+routes that node was always the vehicle's own depot; with open routes it is an arbitrary task
+node, so a parked robot permanently blocks that node (and can deadlock a corridor) for everyone
+else under `one_node_at_a_time`. This is what makes `10Large` come back UNSAT from the scheduling
+stage on every one of the 15 route sets — two vehicles there finish at nodes lying on each other's
+paths. All the smaller instances (`2Small`, `3Small`, `4Small`, `4SmallNu`, `1Large`–`5Large`)
+still solve, and faster than before.
+
 Test cases (`data/test_cases/*.json`) hold `test_data` (graph nodes with `x`/`y`/`next`, `Environment` folder name, `Autonomy`, `charging_coefficient`, `Big_number`, `hub_nodes`), `ATRs` (robot id → start node), and `jobs` (each with `location`, `precedence`, `TW`, `Service`, `ATR`). `Compo_slim` synthesizes extra dummy recharge tasks from `start_*` jobs before building the instance.
 
 ### Second scheduler backend — `src/pkg_sche/occbs/`
@@ -86,7 +105,7 @@ Because OC-CBS takes a single goal per agent while a robot may have a chain of t
 
 **Multi-waypoint instances currently do not work.** With staggered release times, `4Small`'s leg 1 finds no solution even at a 300s limit, while the same leg solves instantly with all releases at zero, with any single agent released late, and with all agents released late uniformly — only the staggered combination fails. This has not been root-caused; it is not a floating-point artifact, and it reproduces with the pre-release wait section disabled. A plausible but unverified cause is CCBS's assumption that an agent which reaches its goal stays there forever, which turns early finishers into permanent obstacles for late-released agents. Until this is understood, use the `occbs` backend only on single-goal instances and `sp_comsat` for the rest.
 
-Note also that the two backends differ in more than conflict handling: sp_comsat routes each vehicle **back to its start**, so on `4SmallNu` it reports makespan 250.12 against OC-CBS's 42. The schedules are not comparable on makespan.
+Note also that the two backends differ in more than conflict handling. sp_comsat's routes used to be **closed** — every vehicle drove back to its depot — which is why it reported makespan 250.12 on `4SmallNu` against OC-CBS's 42; `E_Routing_Gurobi` now produces **open** routes (see "Open routes" below), so the return legs are gone and the two are closer, but sp_comsat still schedules under node/edge mutual exclusion and time windows, so the schedules remain not directly comparable on makespan.
 
 ### Third scheduler backend — `src/pkg_sche/aoccbs/`
 
@@ -105,12 +124,11 @@ instance first to decide which robot gets which job and in what order — jobs m
 several candidate ATRs, exactly as `sp_comsat` itself allows — and hands the resulting per-robot
 chains to AOC-CBS, which only has to solve the trajectories. `_robot_task_specs_via_routing`
 builds the routing sub-solver's `Instance` via `Compo_slim.build_instance` (factored out of
-`Compo_slim` for this reuse) and keeps only each route's real job visits — the 'start'/'end'
-depot bookends and any 'recharge' stops are dropped, since AOC-CBS has no notion of a battery.
-This still inherits the routing MILP's own limits: it honours `TW`, precedence and autonomy but,
-like the rest of `E_Routing_Gurobi`, always routes every vehicle back to its start (see the
-makespan note below), and needs Gurobi even though the plain `assign_via_routing=False` path
-does not.
+`Compo_slim` for this reuse) and keeps only each route's real job visits — the leading 'start'
+depot task and any 'recharge' stops are dropped, since AOC-CBS has no notion of a battery (routes
+are open, so there is no trailing 'end' task to drop any more). This still inherits the routing
+MILP's own limits: it honours `TW`, precedence and autonomy, and it needs Gurobi even though the
+plain `assign_via_routing=False` path does not.
 
 Unlike OC-CBS, AOC-CBS is a pure-Python library and needs no compiler: it is vendored, unbuilt,
 into the gitignored `external/AOC-CBS` and installed editable —
