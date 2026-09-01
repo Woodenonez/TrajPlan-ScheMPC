@@ -54,27 +54,34 @@ seeds = [
 # python src/roadmap_to_testcase.py movingai --map den312d --scenario random-1 --n-agents 7 --cell-size 2 --seed 7 --clearance 0.7 --out test_9
 
 
-def _schedule_diff_stats(instance_name):
-    """Compare the planned schedule.csv against the realised Actual_<instance_name>.csv,
-    both in the robot_id,node_id,ETA format, joined on (robot_id, node_id).
-
-    Returns per-node ETA deviation (actual - planned) summary stats, already CSV-ready
-    (blank strings where no comparison is possible)."""
+def _merged_schedule_df(instance_name):
+    """Join the planned schedule.csv against the realised Actual_<instance_name>.csv, both
+    in the robot_id,node_id,ETA format, on (robot_id, node_id). Returns None if either file
+    is missing (scheduler failed, so schedule.csv wasn't refreshed for this instance, or the
+    controller never ran)."""
     schedule_path = os.path.join(schedule_dir, "schedule.csv")
     actual_path = os.path.join(schedule_dir, f"Actual_{instance_name}.csv")
     if not (os.path.exists(schedule_path) and os.path.exists(actual_path)):
-        return {"n_nodes_compared": 0, "n_nodes_missing": "",
-                "mean_eta_diff_s": "", "max_abs_eta_diff_s": ""}
+        return None
 
     planned = pd.read_csv(schedule_path)
     actual = pd.read_csv(actual_path)
     merged = planned.merge(actual, on=["robot_id", "node_id"], how="left",
                             suffixes=("_planned", "_actual"))
-    diff = merged["ETA_actual"] - merged["ETA_planned"]
-    compared = diff.dropna()
+    merged["ETA_diff"] = merged["ETA_actual"] - merged["ETA_planned"]
+    return merged
+
+
+def _schedule_diff_stats(merged):
+    """Summary stats (CSV-ready, blank where no comparison is possible) over a
+    `_merged_schedule_df` result's per-node ETA deviations (actual - planned)."""
+    if merged is None:
+        return {"n_nodes_compared": 0, "n_nodes_missing": "",
+                "mean_eta_diff_s": "", "max_abs_eta_diff_s": ""}
+    compared = merged["ETA_diff"].dropna()
     return {
         "n_nodes_compared": int(compared.shape[0]),
-        "n_nodes_missing": int(diff.isna().sum()),
+        "n_nodes_missing": int(merged["ETA_diff"].isna().sum()),
         "mean_eta_diff_s": round(float(compared.mean()), 3) if not compared.empty else "",
         "max_abs_eta_diff_s": round(float(compared.abs().max()), 3) if not compared.empty else "",
     }
@@ -87,6 +94,30 @@ def _write_result_row(row):
         if not file_exists:
             writer.writeheader()
         writer.writerow(row)
+
+
+def _write_instance_csv(instance_name, summary_row, merged):
+    """Per-instance CSV: `summary_row` (the same fields written to experiments_results.csv)
+    repeated on every line, alongside the full planned-vs-actual per-node breakdown --
+    i.e. schedule.csv and Actual_<instance_name>.csv joined on (robot_id, node_id)."""
+    node_fields = ["robot_id", "node_id", "ETA_planned", "ETA_actual", "ETA_diff"]
+    fieldnames = RESULT_FIELDS + node_fields
+    out_path = os.path.join(results_dir, f"{instance_name}.csv")
+
+    with open(out_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        if merged is not None and not merged.empty:
+            for _, node_row in merged.iterrows():
+                writer.writerow({
+                    **summary_row,
+                    "robot_id": node_row["robot_id"], "node_id": node_row["node_id"],
+                    "ETA_planned": node_row["ETA_planned"], "ETA_actual": node_row["ETA_actual"],
+                    "ETA_diff": node_row["ETA_diff"],
+                })
+        else:
+            writer.writerow({**summary_row, **{f: "" for f in node_fields}})
+    return out_path
 
 
 def ExpRunner(maps, scenarios, n_agents, seeds):
@@ -146,6 +177,7 @@ def ExpRunner(maps, scenarios, n_agents, seeds):
                         scheduler_success = result.get("status") != "no_schedule"
                         row["scheduler_success"] = int(scheduler_success)
 
+                        merged = None
                         if scheduler_success:
                             mpc_status = result.get("status")
                             mpc_success = mpc_status == "success"
@@ -153,11 +185,14 @@ def ExpRunner(maps, scenarios, n_agents, seeds):
                             if not mpc_success:
                                 row["mpc_failure_reason"] = MPC_REASON_LABELS.get(mpc_status, mpc_status)
 
-                            row.update(_schedule_diff_stats(instance_name))
+                            merged = _merged_schedule_df(instance_name)
+                            row.update(_schedule_diff_stats(merged))
 
                     except Exception as exc:
+                        merged = None
                         row["error"] = f"{type(exc).__name__}: {exc}"
 
                     _write_result_row(row)
+                    _write_instance_csv(instance_name, row, merged)
 
     return results_csv_path
