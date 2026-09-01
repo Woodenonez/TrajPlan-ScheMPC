@@ -477,6 +477,12 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     if unreached:
         print(f"[run_mpc] Nodes never reached: {unreached}")
 
+    # Non-convergence is per-solve and easy to miss tick by tick; the totals are not. A run
+    # can finish "successfully" while a robot was steered by hundreds of non-optimal iterates.
+    bad_exits = {rid: robot_manager.get_controller(rid).bad_exit_count for rid in robot_ids}
+    if any(bad_exits.values()):
+        print(f"[run_mpc] Solves with a bad exit status (per robot): {bad_exits}")
+
     if MONITOR_COST and not headless: # XXX
         import matplotlib.pyplot as plt # type: ignore
         fig, ax = plt.subplots(1, 1)
