@@ -27,6 +27,12 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
                                   first_solution_only=first_solution_only)
         else:
             raise ValueError(f"unknown scheduler_backend {scheduler_backend!r}")
+
+        if not solution:
+            print(f"[main] scheduler found no solution for problem {problem!r} "
+                  f"within the time limit; not running the controller.")
+            return {"status": "no_schedule", "problem": problem}
+
         # save the schedule (I don't actually need this step, but it is more readable than the csv)
         with open(f"{src_path}/pkg_sche/MPC_input.json",'w') as logfile:
             json.dump(solution, logfile, indent=4)
