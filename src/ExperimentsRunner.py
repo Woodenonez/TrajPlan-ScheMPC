@@ -97,26 +97,29 @@ def _write_result_row(row):
 
 
 def _write_instance_csv(instance_name, summary_row, merged):
-    """Per-instance CSV: `summary_row` (the same fields written to experiments_results.csv)
-    repeated on every line, alongside the full planned-vs-actual per-node breakdown --
-    i.e. schedule.csv and Actual_<instance_name>.csv joined on (robot_id, node_id)."""
+    """Per-instance CSV. One header line naming all 18 columns, then the summary line --
+    the same fields written to experiments_results.csv, filling columns 1-13 only -- then
+    one line per scheduled node in columns 14-18: the full planned-vs-actual breakdown,
+    i.e. schedule.csv and Actual_<instance_name>.csv joined on (robot_id, node_id).
+    The summary is written once rather than repeated on every node line."""
     node_fields = ["robot_id", "node_id", "ETA_planned", "ETA_actual", "ETA_diff"]
     fieldnames = RESULT_FIELDS + node_fields
+    blank_summary = {f: "" for f in RESULT_FIELDS}
+    blank_nodes = {f: "" for f in node_fields}
     out_path = os.path.join(results_dir, f"{instance_name}.csv")
 
     with open(out_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
+        writer.writerow({**summary_row, **blank_nodes})
         if merged is not None and not merged.empty:
             for _, node_row in merged.iterrows():
                 writer.writerow({
-                    **summary_row,
+                    **blank_summary,
                     "robot_id": node_row["robot_id"], "node_id": node_row["node_id"],
                     "ETA_planned": node_row["ETA_planned"], "ETA_actual": node_row["ETA_actual"],
                     "ETA_diff": node_row["ETA_diff"],
                 })
-        else:
-            writer.writerow({**summary_row, **{f: "" for f in node_fields}})
     return out_path
 
 
