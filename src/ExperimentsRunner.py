@@ -143,7 +143,7 @@ def ExpRunner(maps, scenarios, n_agents, seeds):
                         convert_movingai(
                             map_name=map,
                             n_agents=n_agent,
-                            scenario=f'{map}-random-{scenario}',
+                            scenario=f'random-{scenario}',
                             seed=seed,
                             method="grid",
                             connectedness=8,
@@ -159,13 +159,13 @@ def ExpRunner(maps, scenarios, n_agents, seeds):
                             naive_tracker=False,  # True = proportional baseline, False = NMPC (see mpc_backend)
                             ignore_speed_ref=False,
                             recording=False,
-                            scheduler_backend="sp_comsat",  # "sp_comsat", "occbs", or "aoccbs"
+                            scheduler_backend="ComSat",  # "ComSat", "occbs", or "aoccbs"
                             assign_via_routing=False,
                             first_solution_only=False,
                             mpc_backend="panoc",
                             headless=True,
                             late_threshold_s=30.0,
-                            stuck_timeout_s=30.0,
+                            stuck_timeout_s=False,
                             collision_check=True,
                             collision_margin=0.0,
                         )
@@ -196,3 +196,32 @@ def ExpRunner(maps, scenarios, n_agents, seeds):
                     _write_instance_csv(instance_name, row, merged)
 
     return results_csv_path
+
+if __name__ == "__main__":
+
+    maps = ['den312d',
+            # 'den520d',
+            # 'emtpy-16-16',
+            # 'maze-128-128-2',
+            # 'maze-32-32-2',
+            # 'random-64-64-8',
+            # 'room-32-32-4',
+            # 'room-64-64-8',
+            # 'warehhouse-10-20-10-2-2'
+            ]
+
+    scenarios = ['1']
+
+    n_agents = [
+        4,
+        # '5','6','7','8','9','10',
+        # '11','12','13','14','15','16','17','18','19','20'
+    ]
+
+    seeds = [
+        3,
+        # '4','5','6','7',
+        # '8','9','10','11','12'
+    ]
+
+    ExpRunner(maps, scenarios, n_agents, seeds)
