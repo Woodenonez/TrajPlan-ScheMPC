@@ -286,10 +286,41 @@ Two consequences of the zero-filled parameter blocks are handled explicitly. Unu
 state-independent, so harmless to the optimum, but it obscures the reported cost; `_empty_slot_tol`
 gates them out. Unused dynamic slots carry `alpha = 0` and so already contribute nothing.
 
-Still off, and separate from the above: `cost_fleet_pred`, the *predictive* fleet term. Only
-current-step fleet collision is active. Note also that `run_mpc.py` calls `run_step` with
-`full_dyn_obstacle_list=None`, so the dynamic-obstacle cost is correct but inert in this project
-as it stands — other robots reach the MPC through the fleet term, not through `o_d`.
+Note also that `run_mpc.py` calls `run_step` with `full_dyn_obstacle_list=None`, so the
+dynamic-obstacle cost is correct but inert in this project as it stands — other robots reach
+the MPC through the fleet term, not through `o_d`.
+
+##### Fleet collision avoidance: the predictive term is the one that matters
+
+Both backends carry two robot-to-robot terms, and **the predictive one carries the heavy
+weight** (PANOC: 1000 vs 10; CasADi: `qfleet_pred` 1000 vs `qfleet` 10):
+
+- `cost_fleet_pred` compares the ego robot's predicted state at horizon step `k` against the
+  other robots' *predicted* states at that same step (each robot publishes its last solved
+  trajectory through `RobotManager.get_other_robot_states`). This is the only term that knows
+  where the other robots are going.
+- `cost_fleet` compares the ego robot's whole predicted horizon against the other robots'
+  positions **frozen at solve time**. For two robots crossing paths this is satisfied simply by
+  driving forward, since the frozen point falls behind. It is a cheap guard near `k = 0`, not
+  an avoidance mechanism.
+
+The weights used to be the other way round on both backends (and on CasADi `cost_fleet_pred`
+was commented out altogether), which made robot-robot avoidance ineffective: on `4Small` with
+the `aoccbs` schedule, A1 and A2 closed monotonically from 1.08 m to contact while the
+1000-weight term read exactly 0.0 on every tick and the 10-weight term was correctly predicting
+a 0.2 m overlap four steps ahead. Swapping them, plus the constraint below, resolves it — the
+run completes with a closest approach of 1.12 m, at the cost of 4.4 s of lateness.
+
+On PANOC, fleet overlap is additionally an **ALM penalty constraint**, not just a cost:
+`step_cost` returns `penalty_constraints_fleet` (positive only once two bodies overlap, using
+the same `2*vehicle_width` test as `run_mpc`'s collision checker) alongside the static- and
+dynamic-obstacle residuals, so PANOC drives it toward zero rather than pricing it. This is what
+makes "arrive late" preferable to "collide" rather than merely costlier. The CasADi backend has
+no equivalent yet — there it remains a soft cost only.
+
+Both are stated against the *predicted* positions, so both inherit the unused-slot convention:
+empty other-robot slots are filled with `-10.0`, which is harmless only as long as no map puts
+a robot near (-10, -10).
 
 ##### Casadi-only config keys
 
@@ -300,8 +331,8 @@ solver, and the backends are *not* automatically comparable on these settings.
 
 | Key | Default | Replaces |
 |---|---|---|
-| `qfleet` / `qfleet_pred` | 1.0 / 0.5 | `_large_weight` / `_small_weight` (PANOC uses 1000 / 10, always active in panoc_light) |
-| `fleet_safe_distance` / `fleet_critical_distance` | 0.1 / 0.05 m | the two literals in `_stage_cost` |
+| `qfleet` / `qfleet_pred` | 10.0 / 1000.0 | `_w_fleet` / `_w_fleet_pred`; the predictive term is the heavy one (PANOC uses the same 10 / 1000 split) |
+| `fleet_safe_distance` / `fleet_critical_distance` | `null` / `null` (derived: 1.107 / 0.907 m) | the two literals in `_stage_cost` |
 | `critical_step` | 100 | `_critical_step` |
 | `obstacle_beta` | 10.0 | `_obstacle_beta` |
 | `rho_init` / `rho_factor` / `max_outer_iter` | 10.0 / 5.0 / 5 | the tracker's homotopy constants |
@@ -311,10 +342,10 @@ solver, and the backends are *not* automatically comparable on these settings.
 CasADi converts it to `ipopt.max_cpu_time` (microseconds → seconds).
 
 The fleet distances accept `null`, which derives them from `robot_spec.yaml` exactly as PANOC does
-— `2*(vehicle_width+vehicle_margin)` and `2*vehicle_width+vehicle_margin`. **The defaults carry the
-upstream literals forward, and they are far smaller than that:** with the shipped spec the derived
-values are 1.4 m and 1.2 m against 0.1 m and 0.05 m, so as configured the fleet term barely
-engages before robots are almost touching. Set both to `null` to match PANOC.
+— `2*(vehicle_width+vehicle_margin)` = 1.107 m and `2*vehicle_width+vehicle_margin` = 0.907 m — and
+`null` is now the shipped default for both. They previously carried upstream's literals (0.1 and
+0.05 m), far below the robot's own body diameter of 0.707 m, so the fleet term only engaged once
+the two robots already overlapped. Do not set them below 0.707 m for the shipped robot spec.
 
 `CostMonitor` (`MONITOR_COST` in `run_mpc.py`) scores the *PANOC* cost expression, so it still
 requires OpenGEN. It is built lazily in `set_monitor`, which keeps the CasADi backend usable on
