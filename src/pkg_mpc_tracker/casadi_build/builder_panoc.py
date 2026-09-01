@@ -155,17 +155,46 @@ class PanocBuilder:
         cts.cost_input = ca.sum1(ca.vertcat(pts['v'], pts['w']) * action**2) 
 
         ### Fleet collision avoidance
+        # Geometry, not tuning. `contact_distance` is where two robot bodies actually touch --
+        # the same test `run_mpc`'s collision checker applies (2*vehicle_width). The other two
+        # add the safety margin and the wider comfort band on top of it. Hoisted out of the
+        # `if` below, where `safe_distance` used to be assigned but was read unconditionally
+        # afterwards (only safe as long as critical_step > N_hor).
+        contact_distance  = 2*self._spec.vehicle_width
+        critical_distance = 2*self._spec.vehicle_width+self._spec.vehicle_margin
+        safe_distance     = 2*(self._spec.vehicle_width+self._spec.vehicle_margin)
+
+        ## Fleet collision avoidance [Predictive]
+        # The predictive term carries the *heavy* weight, because it is the only one holding
+        # correct information: it compares the ego robot's predicted state at step k against
+        # the other robots' predicted states at that same step. The current-position term
+        # below freezes the other robots wherever they were at solve time and holds them there
+        # for the whole horizon, so for two robots crossing paths it is satisfied simply by
+        # driving forward. The weights used to be the other way round (1000 on the frozen
+        # snapshot, 10 on the prediction), which is why the fleet cost could not stop a
+        # crossing: measured on an A1/A2 collision on 4Small, the 1000-weight term read
+        # exactly 0.0 on every tick right up to contact while the 10-weight term was
+        # correctly reporting a 0.2 m overlap four steps ahead.
+        cts.cost_fleet_pred = mc.cost_fleet_collision(state[:2], other_robot_pred_positions,
+                                                      safe_distance=safe_distance, weight=self._large_weight)
         if step_in_horizon < critical_step:
-            safe_distance = 2*(self._spec.vehicle_width+self._spec.vehicle_margin)
-            critical_distance = 2*self._spec.vehicle_width+self._spec.vehicle_margin
-            cts.cost_fleet = mc.cost_fleet_collision(state[:2], other_robot_positions, 
-                                                     safe_distance=critical_distance, weight=self._large_weight)
+            cts.cost_fleet = mc.cost_fleet_collision(state[:2], other_robot_positions,
+                                                     safe_distance=critical_distance, weight=self._small_weight)
         else:
             cts.cost_fleet = 0.0
-        ## Fleet collision avoidance [Predictive]
-        cts.cost_fleet_pred = mc.cost_fleet_collision(state[:2], other_robot_pred_positions,
-                                                      safe_distance=safe_distance, weight=self._small_weight)
-        
+
+        ### Fleet collision as a constraint, not merely a price.
+        # Static and dynamic obstacles each contribute an ALM penalty constraint that PANOC
+        # drives to (near) zero, but robot-robot overlap contributed none -- it was only ever
+        # expensive, so it could always be traded away against reference tracking. This
+        # residual is zero whenever the two bodies are clear of each other and grows once they
+        # overlap, which is what makes "arrive late" preferable to "collide" rather than just
+        # costlier. It is stated against the predicted positions for the same reason as above.
+        penalty_constraints_fleet = ca.sum2(
+            ca.fmax(0.0, contact_distance**2
+                         - mh.dist_to_points_square(state[:2], other_robot_pred_positions))
+        )
+
         ### Static obstacles
         penalty_constraints_stcobs = 0.0
         for i in range(self._cfg.Nstcobs):
@@ -214,7 +243,8 @@ class PanocBuilder:
         inside_dyn_obstacle = mh.inside_ellipses(state.T, [x_dyn, y_dyn, rx_dyn, ry_dyn, As])
         penalty_constraints_dynobs_pred += ca.fmax(0, inside_dyn_obstacle)
 
-        other_stuff = [penalty_constraints_stcobs, penalty_constraints_dynobs]
+        other_stuff = [penalty_constraints_stcobs, penalty_constraints_dynobs,
+                       penalty_constraints_fleet]
         return state, cts, other_stuff
 
     def build(self, use_tcp:bool=False, test:bool=False):

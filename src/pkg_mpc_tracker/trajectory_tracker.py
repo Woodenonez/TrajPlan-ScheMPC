@@ -291,6 +291,10 @@ class TrajectoryTracker:
         self.past_actions: list[np.ndarray] = []
         self.cost_timelist: list[float] = []
         self.solver_time_timelist: list[float] = []
+        # How many solves came back with a status in `config.bad_exit_codes`. Reported by
+        # `run_mpc` at the end of a run, since a run that looks fine can still have been
+        # steered by hundreds of non-optimal iterates.
+        self.bad_exit_count: int = 0
 
         self._idle = False
         self.finishing = False # If approaching the last node of the reference path
@@ -795,8 +799,22 @@ class TrajectoryTracker:
                 init_guess = self._build_aligning_warm_start(align_target_theta)
             taken_states, pred_states, actions, cost, solver_time, exit_status, u = self.run_solver(params, self.state, self.config.action_steps, initial_guess=init_guess)
             # actions = [x*np.array([1.0-speed_decay, 1.0]) for x in actions]
-            if exit_status in self.config.bad_exit_codes and self.vb:
-                print(f"[{self.__class__.__name__}-{self.robot_id}] Bad converge status: {exit_status}")
+            # A bad exit status means the returned inputs are a non-optimal iterate, not a
+            # solution -- so it must not be silent, and it must not be committed open-loop for
+            # the full `action_steps`. This print used to be gated behind `self.vb`, which
+            # `run_mpc.py` leaves False, so a robot could return NotConvergedIterations on 9
+            # ticks out of 10 through a collision without a word appearing anywhere.
+            if exit_status in self.config.bad_exit_codes:
+                self.bad_exit_count += 1
+                if self.config.action_steps > 1:
+                    # Re-commit the same solve over a single step so the next solve happens
+                    # one `ts` from now instead of `action_steps*ts` from now. Braking here
+                    # instead was tempting but risks a permanent stall: a robot that never
+                    # converges would never move again.
+                    taken_states, pred_states, actions = self.rollout_solution(self.state, u, 1)
+                print(f"[{self.__class__.__name__}-{self.robot_id}] Bad converge status: "
+                      f"{exit_status} (#{self.bad_exit_count}); committing "
+                      f"{len(actions)}/{self.config.action_steps} step(s) and re-solving.")
         except RuntimeError:
             if self.use_tcp:
                 self.mng.kill()
@@ -911,6 +929,25 @@ class TrajectoryTracker:
         else:
             raise ModuleNotFoundError(f'There is no solver with type {self.solver_type}.')
         
+        taken_states, pred_states, actions = self.rollout_solution(state, u, take_steps)
+        return taken_states, pred_states, actions, cost, solver_time, exit_status, u
+
+    def rollout_solution(self, state: np.ndarray, u: list, take_steps: int):
+        """Turn a solver input sequence `u` into the states/actions to be committed.
+
+        Split out of `run_solver` so a solve that came back with a bad exit status can be
+        re-committed over fewer steps without being re-solved -- see `_run_step`.
+
+        Args:
+            state: The current state.
+            u: The full input sequence returned by the solver.
+            take_steps: How many control steps of `u` to actually commit.
+
+        Returns:
+            taken_states: The states over the committed steps.
+            pred_states: The predicted states over the remaining horizon.
+            actions: The committed actions.
+        """
         taken_states:list[np.ndarray] = []
         for i in range(take_steps):
             state_next = self.motion_model(state, np.array(u[(i*self.nu):((i+1)*self.nu)]), self.ts)
@@ -924,7 +961,7 @@ class TrajectoryTracker:
 
         actions = np.array(u[:self.nu*take_steps]).reshape(take_steps, self.nu).tolist()
         actions = [np.array(action) for action in actions] # type: ignore
-        return taken_states, pred_states, actions, cost, solver_time, exit_status, u
+        return taken_states, pred_states, actions
 
     def run_solver_tcp(self, parameters:list, state: np.ndarray, take_steps:int=1):
         solution = self.mng.call(parameters)

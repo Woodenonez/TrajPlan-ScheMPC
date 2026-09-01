@@ -65,8 +65,15 @@ class CasadiNMPC:
         self.N_hor = self._cfg.N_hor #control/pred horizon
 
         ### Tuning knobs from config/mpc_*.yaml (these used to be literals in this file).
-        self._large_weight = self._cfg.qfleet      # current-step fleet collision weight
-        self._small_weight = self._cfg.qfleet_pred # predictive fleet collision weight
+        # Named for what they weigh, not for their magnitude: `qfleet_pred` is now the heavy
+        # one of the pair (it is the term with correct information -- see `_stage_cost`), so
+        # the old `_large_weight`/`_small_weight` names would have read backwards.
+        self._w_fleet = self._cfg.qfleet           # current-step (frozen snapshot) fleet weight
+        self._w_fleet_pred = self._cfg.qfleet_pred # predictive fleet collision weight
+        # The dynamic-obstacle cost used to borrow `qfleet` as its "big constant", which meant
+        # retuning the fleet terms silently retuned obstacle avoidance too. PANOC uses its own
+        # 1000 there, so mirror that rather than coupling the two.
+        self._dynobs_weight = 1000.0
         self._critical_step = int(self._cfg.critical_step)
         self._obstacle_beta = float(self._cfg.obstacle_beta)
         # `null` in the YAML means "derive from the robot spec", which is what PANOC does.
@@ -177,22 +184,30 @@ class CasadiNMPC:
 
         ### Fleet collision avoidance: J_f =  max(0,Q_f * (d_fleet - distance))**2
         ### used from mpc_cost, cost_fleet_collision.
+        ### Fleet collision avoidance [Predictive] -- this is the term that carries the
+        ### heavy weight (`qfleet_pred`), mirroring `builder_panoc.step_cost`. It compares the
+        ### ego robot's predicted state at step k against the other robots' *predicted* states
+        ### at that same step, so it is the only one of the two that knows where the other
+        ### robots are actually going. It used to be commented out entirely here, leaving the
+        ### CasADi backend with nothing but the frozen-snapshot term below.
+        cts.cost_fleet_pred = mc.cost_fleet_collision(
+            x_next[:2],
+            self._other_robots_at_step(k),
+            safe_distance=self._safe_distance,
+            weight=self._w_fleet_pred,
+        )
+
+        # The current-position term freezes the other robots wherever they were at solve time
+        # and holds them there across the whole horizon, so for two robots crossing paths it
+        # is satisfied simply by driving forward -- it is a cheap guard for the k~0 region,
+        # not a collision-avoidance mechanism, and so carries the lighter weight (`qfleet`).
         if k < self._critical_step:
             cts.cost_fleet = mc.cost_fleet_collision(
                 x_next[:2],
                 self._other_robots_current(),
                 safe_distance=self._critical_distance,
-                weight=self._large_weight,
+                weight=self._w_fleet,
             )
-
-        # ## Fleet collision avoidance [Predictive] -- still disabled; weight is `qfleet_pred`
-        # ## and distance `fleet_safe_distance` in config/mpc_*.yaml when it is switched on.
-        # cts.cost_fleet_pred = mc.cost_fleet_collision(
-        #     x_next[:2],
-        #     self._other_robots_at_step(k),
-        #     safe_distance=self._safe_distance,
-        #     weight=self._small_weight,
-        # )
         ### J_O dynamic/static obstacle costs, mirroring the PANOC implementation but
         ### routed through the smooth variants so IPOPT gets a usable gradient.
         cts.cost_stcobs = self._static_obstacle_cost(x_next, self._q_stc[k])
@@ -263,7 +278,7 @@ class CasadiNMPC:
             ang_dyn,
             alpha_dyn,
         ]
-        cost += mc.cost_inside_ellipses_smooth(state.T, ellipse_param, weight=self._large_weight, beta=self._obstacle_beta)
+        cost += mc.cost_inside_ellipses_smooth(state.T, ellipse_param, weight=self._dynobs_weight, beta=self._obstacle_beta)
         return cost
 
     def _static_obstacle_intrusion(self, state: ca.SX) -> ca.SX:
