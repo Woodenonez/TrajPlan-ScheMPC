@@ -11,11 +11,11 @@ data_path = os.path.join(project_root, "data")
 
 
 def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False,
-                  scheduler_backend="sp_comsat", mpc_backend=None, assign_via_routing=False,
+                  scheduler_backend="ComSat", mpc_backend=None, assign_via_routing=False,
                   first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
                   collision_check=True, collision_margin=0.0):
     if scheduler:
-        if scheduler_backend == "sp_comsat":
+        if scheduler_backend == "ComSat":
             from pkg_sche.sp_comsat.Compo_slim import Compo_slim
             instance, optimum, running_time, len_previous_routes, paths_changed, solution = Compo_slim(problem)
         elif scheduler_backend == "occbs":
@@ -72,12 +72,12 @@ if __name__ == "__main__":
     result = general_funct(
         sys.argv[1],
         scheduler = True,
-        controller= False,
+        controller= True,
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
-        scheduler_backend= "sp_comsat", # "sp_comsat", "occbs", or "aoccbs"
-        assign_via_routing= False, # aoccbs only: use sp_comsat's Gurobi routing sub-solver to
+        scheduler_backend= "aoccbs", # "ComSat", "occbs", or "aoccbs"
+        assign_via_routing= False, # aoccbs only: use ComSat's Gurobi routing sub-solver to
                               # assign jobs to robots first, instead of requiring every job
                               # pre-pinned to one ATR (see pkg_sche.aoccbs.runner)
         first_solution_only= False, # aoccbs only: stop at the first feasible joint plan instead

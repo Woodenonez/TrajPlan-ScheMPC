@@ -41,8 +41,8 @@ qfleet_pred: 0.5        # Cost weight for collision with other robots over the h
 # Distances in meters. Set to `null` to derive them from robot_spec.yaml the way PANOC does,
 # i.e. 2*(vehicle_width+vehicle_margin) and 2*vehicle_width+vehicle_margin. With the shipped
 # spec that is 1.4 / 1.2 m, more than ten times the literals below, which came from upstream.
-fleet_safe_distance: 0.1        # Used by the predictive fleet term
-fleet_critical_distance: 0.05   # Used by the current-step fleet term
+fleet_safe_distance: null       # Used by the predictive fleet term
+fleet_critical_distance: null   # Used by the current-step fleet term
 critical_step: 100      # Horizon step past which current-step fleet/dynamic terms switch off
 # Casadi obstacle cost shaping
 obstacle_beta: 10.0     # Sharpness of the smooth obstacle costs; repulsive tail spans ~1/beta meters
