@@ -34,15 +34,21 @@ qpN: 0.0                # Terminal cost; error relative to final reference posit
 qthetaN: 0.0            # Terminal cost; error relative to final reference heading     
 # Fleet (robot-to-robot) collision avoidance
 # NOTE: these four were hard-coded in casadi_impl.py and apply to the Casadi backend only.
-#       PANOC keeps its own built-in values (weights 1000/10, distances derived from
-#       robot_spec.yaml) and ignores this block.
-qfleet: 1.0             # Cost weight for collision with other robots at the current step
-qfleet_pred: 0.5        # Cost weight for collision with other robots over the horizon
-# Distances in meters. Set to `null` to derive them from robot_spec.yaml the way PANOC does,
-# i.e. 2*(vehicle_width+vehicle_margin) and 2*vehicle_width+vehicle_margin. With the shipped
-# spec that is 1.4 / 1.2 m, more than ten times the literals below, which came from upstream.
-fleet_safe_distance: 0.1        # Used by the predictive fleet term
-fleet_critical_distance: 0.05   # Used by the current-step fleet term
+#       PANOC keeps its own built-in values (1000 on the predictive term, 10 on the frozen
+#       one, distances derived from robot_spec.yaml) and ignores this block.
+# `qfleet_pred` is deliberately the heavy one of the pair. It weighs the ego robot's
+# predicted state at step k against the other robots' *predicted* state at that step, so it
+# is the only term that knows where they are going; `qfleet` weighs it against their
+# positions frozen at solve time, which two robots crossing paths satisfy just by driving
+# forward. With the weights the other way round the fleet cost could not prevent a collision.
+qfleet: 10.0            # Cost weight against other robots' positions frozen at solve time
+qfleet_pred: 1000.0     # Cost weight against other robots' predicted positions over the horizon
+# Distances in meters. `null` derives them from robot_spec.yaml the way PANOC does, i.e.
+# 2*(vehicle_width+vehicle_margin) = 1.107 m and 2*vehicle_width+vehicle_margin = 0.907 m.
+# The old literals (0.1 / 0.05) came from upstream and are far below the robot's own body
+# diameter (0.707 m), so the fleet cost only engaged once the robots already overlapped.
+fleet_safe_distance: null       # Used by the predictive fleet term
+fleet_critical_distance: null   # Used by the current-step fleet term
 critical_step: 100      # Horizon step past which current-step fleet/dynamic terms switch off
 # Casadi obstacle cost shaping
 obstacle_beta: 10.0     # Sharpness of the smooth obstacle costs; repulsive tail spans ~1/beta meters
