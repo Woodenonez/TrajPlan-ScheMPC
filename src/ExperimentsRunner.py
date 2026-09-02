@@ -18,7 +18,7 @@ results_csv_path = os.path.join(results_dir, "experiments_results.csv")
 MPC_REASON_LABELS = {"late": "late_threshold"}
 
 RESULT_FIELDS = [
-    "instance", "map", "scenario", "n_agents", "seed",
+    "instance", "map", "scenario", "n_agents", "seed", "method",
     "scheduler_success",
     "mpc_success", "mpc_failure_reason",
     "n_nodes_compared", "n_nodes_missing",
@@ -98,7 +98,7 @@ def _write_instance_csv(instance_name, summary_row, merged):
     return out_path
 
 
-def ExpRunner(schedulers, maps, scenarios, n_agents, seeds):
+def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
 
     os.makedirs(results_dir, exist_ok=True)
 
@@ -111,7 +111,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds):
                         instance_name = f'{map}_scenario-{scenario}_{n_agent}_{seed}'
                         row = {
                             "instance": instance_name, "map": map, "scenario": scenario,
-                            "n_agents": n_agent, "seed": seed,
+                            "n_agents": n_agent, "seed": seed, "method": method,
                             "scheduler_success": 0, "mpc_success": "", "mpc_failure_reason": "",
                             "n_nodes_compared": 0, "n_nodes_missing": "",
                             "mean_eta_diff_s": "", "max_abs_eta_diff_s": "", "error": "",
@@ -124,7 +124,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds):
                                 n_agents=n_agent,
                                 scenario=f'random-{scenario}',
                                 seed=seed,
-                                method="grid",
+                                method=method,
                                 connectedness=8,
                                 simplify=True,
                                 cell_size=2,
@@ -205,4 +205,6 @@ if __name__ == "__main__":
         # '8','9','10','11','12'
     ]
 
-    ExpRunner(schedulers, maps, scenarios, n_agents, seeds)
+    method = "grid"  # "grid" or "sampled" -- how convert_movingai builds the instance graph
+
+    ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method=method)
