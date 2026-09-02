@@ -93,19 +93,24 @@ class RobotManager():
     - `robot_manager.get_XX(robot_id)`: return XX
     """
 
-    ROBOT_ID_LIST:list[int] = []
-
     def __init__(self) -> None:
         self._robot_dict:dict[Any, RobotUnit] = {}
-    
+        self.ROBOT_ID_LIST:list[int] = []
+        # Robot._id_list is a class-level registry (shared across every Robot
+        # instance in the process), so it must be reset here too -- otherwise a
+        # second RobotManager/simulation run in the same process (e.g. looping
+        # over scheduler backends in ExperimentsRunner.py) sees the previous
+        # run's robot ids as already taken and raises on the first add_robot.
+        Robot._id_list = [-1]
+
     def __call__(self, robot_id) -> RobotUnit:
         return self._robot_dict[robot_id]
-    
+
     @staticmethod
-    def _check_id(f): 
+    def _check_id(f):
         """Decorator to check if robot_id exists"""
         def wrapper(self, robot_id, *args, **kwargs):
-            if robot_id not in RobotManager.ROBOT_ID_LIST:
+            if robot_id not in self.ROBOT_ID_LIST:
                 raise ValueError(f'Robot {robot_id} does not exist!')
             return f(self, robot_id, *args, **kwargs)
         return wrapper
