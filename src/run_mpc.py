@@ -22,6 +22,8 @@ from configs import panoc_light_optimizer_name
 from visualizer.object import CircularVehicleVisualizer
 from visualizer.mpc_plot import MpcPlotInLoop # type: ignore
 
+from status_log import status
+
 ### NMPC backends selectable at run time. Keys are what callers pass as `mpc_backend`;
 ### values are the exact strings `TrajectoryTracker` switches on.
 MPC_BACKENDS = {'casadi': 'Casadi', 'panoc': 'PANOC', 'panoc_light': 'PANOC_LIGHT'}
@@ -158,13 +160,16 @@ def relax_final_eta(path_coords, path_times, lin_vel_max):
 
 def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, recording=False, mpc_backend=None,
             headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0, stuck_eps=0.02,
-            stuck_arrival_tol=0.3, collision_check=True, collision_margin=0.0):
+            stuck_arrival_tol=0.3, collision_check=True, collision_margin=0.0, verbose=False):
     """Run the MPC simulation loop.
 
     Args:
         headless: If True, skip the matplotlib live plotter (and its blocking "press
             anything to finish" prompt) entirely, so the whole pipeline can run
             non-interactively -- e.g. from a script or CI -- and simply return a result.
+        verbose: If False (default), only a timestamped "MPC executing"/"MPC done" status
+            line is printed. If True, also print the per-tick reference/cost diagnostics,
+            robot/work-mode setup lines, and the backend/collision-detection setup lines.
         late_threshold_s: A robot is declared failed ("late") once it is still short of
             the node it is currently targeting more than this many seconds past that
             node's scheduled ETA. Pass None or False to disable the check.
@@ -200,8 +205,10 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     MAP_ONLY = True
     AUTORUN = True # if false, press key (in the plot window) to continue
     MONITOR_COST = False # if true, monitor the cost (this will slow down the simulation)
-    VERBOSE = False
+    VERBOSE = verbose
     TIMEOUT = 10000
+
+    status(f"MPC executing (problem={problem!r})")
 
     # `False` is accepted as a synonym for `None` ("disable this check") since callers
     # naturally reach for it as the off-switch for a threshold.
@@ -229,7 +236,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     config_robot = CircularRobotSpecification.from_yaml(config_robot_path)
 
     solver_type = resolve_mpc_backend(config_mpc, mpc_backend, root_dir)
-    if not naive_tracker:
+    if not naive_tracker and VERBOSE:
         print(f"[run_mpc] NMPC backend: {solver_type}")
 
     ### Map, graph, and schedule paths
@@ -304,8 +311,9 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     if collision_check:
         collision_checker = StaticCollisionChecker(gpc.current_map.boundary_coords,
                                                    gpc.current_map.obstacle_coords_list)
-        print(f"[run_mpc] Collision detection on (robot radius {config_robot.vehicle_width:.3f} m, "
-              f"margin {collision_margin:.3f} m)")
+        if VERBOSE:
+            print(f"[run_mpc] Collision detection on (robot radius {config_robot.vehicle_width:.3f} m, "
+                  f"margin {collision_margin:.3f} m)")
 
     for kt in range(TIMEOUT):
         robot_states = []
@@ -352,7 +360,8 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                 # index cannot cross a dead-end turnaround at all.
                 current_heading=float(robot.state[2])
             )
-            print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}") # XXX
+            if VERBOSE:
+                print(f"(K:{kt}) Robot {rid}, ref speed: {round(ref_speed if ref_speed else -1, 4)}, next goal:{planner._current_target_node}")
             controller.set_current_state(robot.state)
             controller.set_ref_states(ref_states, ref_speed=ref_speed)
             if naive_tracker:
@@ -363,10 +372,11 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                                                            other_robot_states=other_robot_states,
                                                            map_updated=True, report_cost=False, ignore_speed_ref=ignore_speed_ref)
             
-            controller.report_cost(debug_info['cost'],
-                                   debug_info['step_runtime'],
-                                   debug_info['monitored_cost'],
-                                   object_id=f"Robot {rid}")
+            if VERBOSE:
+                controller.report_cost(debug_info['cost'],
+                                       debug_info['step_runtime'],
+                                       debug_info['monitored_cost'],
+                                       object_id=f"Robot {rid}")
 
             ### Real run
             # controller.run_step re-solves every tick (this loop calls it once per kt,
@@ -472,7 +482,8 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     arrival_logger.finalize()
     actual_schedule_path = os.path.join(data_dir, f"Actual_{problem}.csv")
     arrival_logger.to_csv(actual_schedule_path)
-    print(f"Actual schedule saved to: {actual_schedule_path}")
+    if VERBOSE:
+        print(f"Actual schedule saved to: {actual_schedule_path}")
     unreached = arrival_logger.unreached()
     if unreached:
         print(f"[run_mpc] Nodes never reached: {unreached}")
@@ -493,18 +504,18 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
         plt.show()
 
     if failure is not None:
-        status = failure["type"]
+        run_status = failure["type"]
     elif incomplete:
-        status = "timeout"
+        run_status = "timeout"
     else:
-        status = "success"
+        run_status = "success"
 
     result = {
-        "status": status,
+        "status": run_status,
         "failure": failure,
         "ticks": kt,
         "time": kt*config_mpc.ts,
         "actual_schedule_path": actual_schedule_path,
     }
-    print(f"[run_mpc] Result: status={status}, ticks={kt}, time={kt*config_mpc.ts:.2f}s")
+    status(f"MPC done: status={result['status']}, ticks={kt}, time={kt*config_mpc.ts:.2f}s")
     return result

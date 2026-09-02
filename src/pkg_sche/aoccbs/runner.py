@@ -34,6 +34,8 @@ intersection intervals are keyed by the same id, so if a test case's node graph 
 preprocessing.
 """
 
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -66,7 +68,7 @@ DEFAULT_AGENT_RADIUS = 0.35
 DEFAULT_EDGE_SPEED = 1.0
 
 
-def _build_state_graph(problem: str, nodes: dict) -> str:
+def _build_state_graph(problem: str, nodes: dict, verbose: bool = True) -> str:
     """Build, save and return the id of the Model1 state graph AOC-CBS solves the problem on.
 
     Reused by id across runs -- see the module docstring for the cache-invalidation caveat.
@@ -74,7 +76,8 @@ def _build_state_graph(problem: str, nodes: dict) -> str:
     sg_id = f"TrajPlan_{problem}"
     try:
         aoccbs_paths.state_graph_model_file(sg_id)
-        print(f"AOC-CBS state graph cached: {sg_id}")
+        if verbose:
+            print(f"AOC-CBS state graph cached: {sg_id}")
         return sg_id
     except FileNotFoundError:
         pass
@@ -92,8 +95,9 @@ def _build_state_graph(problem: str, nodes: dict) -> str:
     state_graph = Model1StateGraph(assign_edge_ids(graph))
     state_graph.id = sg_id
     save_model1_state_graph(state_graph)
-    print(f"built AOC-CBS state graph {sg_id} "
-         f"({graph.number_of_nodes()} vertices, {graph.number_of_edges()} edges)")
+    if verbose:
+        print(f"built AOC-CBS state graph {sg_id} "
+             f"({graph.number_of_nodes()} vertices, {graph.number_of_edges()} edges)")
     return sg_id
 
 
@@ -265,12 +269,17 @@ def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
     with open(f"{PROJECT_ROOT}/data/test_cases/{problem}.json") as f:
         data = json.load(f)
 
-    sg_id = _build_state_graph(problem, data['test_data']['nodes'])
+    sg_id = _build_state_graph(problem, data['test_data']['nodes'], verbose=verbose)
     am_id = create_circular_agent(agent_radius)
 
     workers = workers or os.cpu_count() or 1
-    state_graph_distances.ensure_state_graph_distances(sg_id, workers=workers)
-    intersection_intervals.ensure_intersection_intervals(sg_id, am_id, sg_id, am_id, workers=workers)
+    # AOC-CBS's own cache/progress prints (state_graph_distances.py, intersection_intervals.py)
+    # are not gated by any flag it exposes, so silence them here when quiet rather than
+    # patching the vendored library.
+    stdout_ctx = contextlib.nullcontext() if verbose else contextlib.redirect_stdout(io.StringIO())
+    with stdout_ctx:
+        state_graph_distances.ensure_state_graph_distances(sg_id, workers=workers)
+        intersection_intervals.ensure_intersection_intervals(sg_id, am_id, sg_id, am_id, workers=workers)
 
     chains = _robot_task_specs_via_routing(problem) if assign_via_routing else _robot_task_specs(data)
     problem_config = _build_problem_config(chains, data['ATRs'], am_id, sg_id)

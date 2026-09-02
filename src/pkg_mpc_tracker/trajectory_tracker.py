@@ -83,7 +83,8 @@ class TrajectoryTracker:
             use_tcp: If the PANOC solver is called via TCP or not. Defaults to False.
             verbose: If print out debug information. Defaults to False.
         """
-        print(f"[{self.__class__.__name__}-{robot_id}] Initializing robot {robot_id if robot_id is not None else 'X'}...")
+        if verbose:
+            print(f"[{self.__class__.__name__}-{robot_id}] Initializing robot {robot_id if robot_id is not None else 'X'}...")
 
         self.vb = verbose
         self.robot_id = robot_id if robot_id is not None else 'X'
@@ -318,7 +319,8 @@ class TrajectoryTracker:
         if mode == self._mode:
             return
 
-        print(f"[{self.__class__.__name__}-{self.robot_id}] Setting work mode to {mode}.")
+        if self.vb:
+            print(f"[{self.__class__.__name__}-{self.robot_id}] Setting work mode to {mode}.")
         self._mode = mode
         if mode == 'aligning':
             if use_predefined_speed:

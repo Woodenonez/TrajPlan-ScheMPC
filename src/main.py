@@ -4,6 +4,8 @@ import json
 import csv
 import sys
 
+from status_log import status
+
 
 project_root = pathlib.Path(__file__).resolve().parents[1]
 src_path = os.path.join(project_root, "src")
@@ -13,24 +15,31 @@ data_path = os.path.join(project_root, "data")
 def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False,
                   scheduler_backend="ComSat", mpc_backend=None, assign_via_routing=False,
                   first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
-                  collision_check=True, collision_margin=0.0):
+                  collision_check=True, collision_margin=0.0, verbose=False):
+    """
+    verbose: If False (default), the scheduler and MPC loop only print a handful of
+        timestamped status lines (scheduler executing/done/UNSAT, MPC executing/done).
+        If True, both layers additionally print their normal per-iteration/per-tick
+        diagnostics (CEGAR loop status, AOC-CBS cache/build lines, the MPC's per-tick
+        reference/cost prints, work-mode transitions, ...).
+    """
     if scheduler:
+        status(f"Scheduler executing ({scheduler_backend}, problem={problem!r})")
         if scheduler_backend == "ComSat":
             from pkg_sche.sp_comsat.Compo_slim import Compo_slim
-            instance, optimum, running_time, len_previous_routes, paths_changed, solution = Compo_slim(problem)
+            instance, optimum, running_time, len_previous_routes, paths_changed, solution = Compo_slim(problem, verbose=verbose)
         elif scheduler_backend == "occbs":
             from pkg_sche.occbs.runner import OCCBS
-            solution, _ = OCCBS(problem)
+            solution, _ = OCCBS(problem, verbose=verbose)
         elif scheduler_backend == "aoccbs":
             from pkg_sche.aoccbs.runner import AOCCBS
             solution, _ = AOCCBS(problem, assign_via_routing=assign_via_routing,
-                                  first_solution_only=first_solution_only)
+                                  first_solution_only=first_solution_only, verbose=verbose)
         else:
             raise ValueError(f"unknown scheduler_backend {scheduler_backend!r}")
 
+        status(f"Scheduler done: {'SAT' if solution else 'UNSAT'}")
         if not solution:
-            print(f"[main] scheduler found no solution for problem {problem!r} "
-                  f"within the time limit; not running the controller.")
             return {"status": "no_schedule", "problem": problem}
 
         # save the schedule (I don't actually need this step, but it is more readable than the csv)
@@ -65,7 +74,7 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         return run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref,
                 recording=recording, mpc_backend=mpc_backend, headless=headless,
                 late_threshold_s=late_threshold_s, stuck_timeout_s=stuck_timeout_s,
-                collision_check=collision_check, collision_margin=collision_margin)
+                collision_check=collision_check, collision_margin=collision_margin, verbose=verbose)
     return None
 
 if __name__ == "__main__":
@@ -108,6 +117,10 @@ if __name__ == "__main__":
         collision_margin= False, # extra clearance (metres) required on top of the body radius before
                               # the collision check trips: 0.0 = bodies must actually touch,
                               # positive values also fail on near-misses (0.1 = closer than 10 cm).
+        verbose= False, # True = restore the scheduler's/MPC's full per-iteration/per-tick
+                              # console output; False = just the timestamped status lines
+                              # (scheduler executing/done/UNSAT, MPC executing/done) -- handy
+                              # when running several instances back to back.
     )
     if result is not None and result["status"] != "success":
         raise SystemExit(f"[main] run failed: {result}")

@@ -90,10 +90,11 @@ def build_instance(problem):
     return The_Instance, ATRs
 
 
-def Compo_slim(problem):
+def Compo_slim(problem, verbose=False):
 
-    print('COMPOSITIONAL ALGORITHM #### SLIM ####')
-    print('instance',problem)
+    if verbose:
+        print('COMPOSITIONAL ALGORITHM #### SLIM ####')
+        print('instance',problem)
 
     starting_time = tm()
 
@@ -122,7 +123,8 @@ def Compo_slim(problem):
     while routing_feasibility != unsat and instance == unknown and len(previous_routes) < routes_bound:
 
         #$$$$$$$$$$$ PRINTING $$$$$$$$$$$$$#
-        print('length of previous routes', len(previous_routes))
+        if verbose:
+            print('length of previous routes', len(previous_routes))
 
         # let's solve the routing problem
         routing_start = tm()
@@ -139,7 +141,8 @@ def Compo_slim(problem):
         previous_routes.append(routes_solution)
 
         #$$$$$$$$$$$ PRINTING $$$$$$$$$$$$$#
-        print('routing', routing_feasibility, round(routing_end - routing_start,2))
+        if verbose:
+            print('routing', routing_feasibility, round(routing_end - routing_start,2))
 
         if routing_feasibility == unsat:
             break
@@ -154,7 +157,8 @@ def Compo_slim(problem):
         # schedule_feasibility = unsat
 
         #$$$$$$$$$$$ PRINTING $$$$$$$$$$$$$#
-        print('     schedule', schedule_feasibility, round(schedule_end - schedule_start,2))
+        if verbose:
+            print('     schedule', schedule_feasibility, round(schedule_end - schedule_start,2))
 
         if schedule_feasibility == sat:
             instance = schedule_feasibility
@@ -179,7 +183,8 @@ def Compo_slim(problem):
         while paths_changing_feasibility != unsat and instance == unknown and counter < bound:
 
             #$$$$$$$$$$$ PRINTING $$$$$$$$$$$$$#
-            print('iteration', counter)
+            if verbose:
+                print('iteration', counter)
 
             path_change_start = tm()
             paths_changing_feasibility, paths_changing_solution, new_paths = changer(
@@ -193,7 +198,8 @@ def Compo_slim(problem):
             # paths_changing_feasibility = unsat
 
             # $$$$$$$$$$$ PRINTING $$$$$$$$$$$$$#
-            print('         paths_changer', paths_changing_feasibility, round(path_change_end - path_change_start, 2))
+            if verbose:
+                print('         paths_changer', paths_changing_feasibility, round(path_change_end - path_change_start, 2))
 
             if paths_changing_feasibility == sat:
 
@@ -217,7 +223,8 @@ def Compo_slim(problem):
                 # routes_checking_feasibility = unsat
 
                 #$$$$$$$$$$$ PRINTING $$$$$$$$$$$$$#
-                print('         routes check', routes_checking_feasibility, round(routes_check_end
+                if verbose:
+                    print('         routes check', routes_checking_feasibility, round(routes_check_end
                                                                                   -
                                                                                   routes_check_start,2))
 
@@ -238,7 +245,8 @@ def Compo_slim(problem):
                     # schedule_feasibility = unsat
 
                     #$$$$$$$$$$$ PRINTING $$$$$$$$$$$$$#
-                    print('                 schedule check',schedule_feasibility, round(sched_2_end
+                    if verbose:
+                        print('                 schedule check',schedule_feasibility, round(sched_2_end
                                                                                         -
                                                                                         sched_2_start,2))
 
@@ -259,11 +267,13 @@ def Compo_slim(problem):
     optimum = 'None'
     # just some output to check while running the instances in batches
 
-    print('         feasibility', instance)
-    print('         running time', running_time)
+    if verbose:
+        print('         feasibility', instance)
+        print('         running time', running_time)
     if instance == sat:
         optimum = sum([i.length for i in current_routes])
-        print('         travelling distance: ',round(optimum,2))
+        if verbose:
+            print('         travelling distance: ',round(optimum,2))
 
         # print('CURRENT ROUTES - WHEN THE INSTANCE IS SOLVED')
         # for i in current_routes:
