@@ -802,10 +802,10 @@ class TrajectoryTracker:
             taken_states, pred_states, actions, cost, solver_time, exit_status, u = self.run_solver(params, self.state, self.config.action_steps, initial_guess=init_guess)
             # actions = [x*np.array([1.0-speed_decay, 1.0]) for x in actions]
             # A bad exit status means the returned inputs are a non-optimal iterate, not a
-            # solution -- so it must not be silent, and it must not be committed open-loop for
-            # the full `action_steps`. This print used to be gated behind `self.vb`, which
-            # `run_mpc.py` leaves False, so a robot could return NotConvergedIterations on 9
-            # ticks out of 10 through a collision without a word appearing anywhere.
+            # solution -- so it must not be committed open-loop for the full `action_steps`.
+            # The per-occurrence print below is gated by `self.vb` (quiet by default); a bad
+            # solve is still never *silently* invisible, though -- `run_mpc.py` prints
+            # `bad_exit_count` per robot, unconditionally, once at the end of the run.
             if exit_status in self.config.bad_exit_codes:
                 self.bad_exit_count += 1
                 if self.config.action_steps > 1:
@@ -814,9 +814,10 @@ class TrajectoryTracker:
                     # instead was tempting but risks a permanent stall: a robot that never
                     # converges would never move again.
                     taken_states, pred_states, actions = self.rollout_solution(self.state, u, 1)
-                print(f"[{self.__class__.__name__}-{self.robot_id}] Bad converge status: "
-                      f"{exit_status} (#{self.bad_exit_count}); committing "
-                      f"{len(actions)}/{self.config.action_steps} step(s) and re-solving.")
+                if self.vb:
+                    print(f"[{self.__class__.__name__}-{self.robot_id}] Bad converge status: "
+                          f"{exit_status} (#{self.bad_exit_count}); committing "
+                          f"{len(actions)}/{self.config.action_steps} step(s) and re-solving.")
         except RuntimeError:
             if self.use_tcp:
                 self.mng.kill()
