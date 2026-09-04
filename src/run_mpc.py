@@ -160,8 +160,7 @@ def relax_final_eta(path_coords, path_times, lin_vel_max):
 
 def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, recording=False, mpc_backend=None,
             headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0, stuck_eps=0.02,
-            stuck_arrival_tol=0.3, collision_check=True, collision_margin=0.0, verbose=False,
-            show_initial_state=False):
+            stuck_arrival_tol=0.3, collision_check=True, collision_margin=0.0, verbose=False):
     """Run the MPC simulation loop.
 
     Args:
@@ -171,10 +170,6 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
         verbose: If False (default), only a timestamped "MPC executing"/"MPC done" status
             line is printed. If True, also print the per-tick reference/cost diagnostics,
             robot/work-mode setup lines, and the backend/collision-detection setup lines.
-        show_initial_state: If True (and headless is False), pause right after the map, the
-            roadmap graph, and each robot's start/goal markers are drawn on the plot -- before
-            the simulation loop starts -- with a blocking terminal prompt, so the initial state
-            can be inspected in the plot window before the run proceeds. No-op when headless.
         late_threshold_s: A robot is declared failed ("late") once it is still short of
             the node it is currently targeting more than this many seconds past that
             node's scheduled ETA. Pass None or False to disable the check.
@@ -300,14 +295,6 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                                            controller.final_goal,
                                            color=color_list[i % len(color_list)])
             visualizer.plot(main_plotter.map_ax, *robot.state)
-
-        if show_initial_state:
-            import matplotlib.pyplot as plt # type: ignore
-            main_plotter.map_ax.set_title('Initial state (map, graph, robot start '
-                                           '★ / goal ✗)')
-            main_plotter.show()
-            plt.pause(0.01)
-            input('[run_mpc] Initial state shown -- press Enter to start the simulation.')
 
     ### Records when each robot actually reaches each node of its schedule, and writes that
     ### out below in `schedule.csv`'s own `robot_id,node_id,ETA` format, so planned and
