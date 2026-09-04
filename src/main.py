@@ -15,13 +15,17 @@ data_path = os.path.join(project_root, "data")
 def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False,
                   scheduler_backend="ComSat", mpc_backend=None, assign_via_routing=False,
                   first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
-                  collision_check=True, collision_margin=0.0, verbose=False):
+                  collision_check=True, collision_margin=0.0, verbose=False, show_initial_state=False):
     """
     verbose: If False (default), the scheduler and MPC loop only print a handful of
         timestamped status lines (scheduler executing/done/UNSAT, MPC executing/done).
         If True, both layers additionally print their normal per-iteration/per-tick
         diagnostics (CEGAR loop status, AOC-CBS cache/build lines, the MPC's per-tick
         reference/cost prints, work-mode transitions, ...).
+    show_initial_state: If True (and controller and not headless), pause right after the map,
+        roadmap graph, and each robot's start/goal markers are drawn, before the simulation
+        starts, so the initial state can be inspected in the plot window. Requires the
+        controller to run, since the plot lives inside run_mpc.
     """
     if scheduler:
         status(f"Scheduler executing ({scheduler_backend}, problem={problem!r})")
@@ -74,7 +78,8 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         return run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref,
                 recording=recording, mpc_backend=mpc_backend, headless=headless,
                 late_threshold_s=late_threshold_s, stuck_timeout_s=stuck_timeout_s,
-                collision_check=collision_check, collision_margin=collision_margin, verbose=verbose)
+                collision_check=collision_check, collision_margin=collision_margin, verbose=verbose,
+                show_initial_state=show_initial_state)
     return None
 
 if __name__ == "__main__":
@@ -121,6 +126,10 @@ if __name__ == "__main__":
                               # console output; False = just the timestamped status lines
                               # (scheduler executing/done/UNSAT, MPC executing/done) -- handy
                               # when running several instances back to back.
+        show_initial_state= False, # True = pause in the plot window right after the map, graph,
+                              # and each robot's start/goal markers are drawn, before the
+                              # simulation starts -- lets you inspect the initial state before
+                              # it runs. Needs controller=True and headless=False.
     )
     if result is not None and result["status"] != "success":
         raise SystemExit(f"[main] run failed: {result}")
