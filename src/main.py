@@ -86,12 +86,12 @@ if __name__ == "__main__":
     # problem = 'test_4' # why do agents go to a THIRD location?
     result = general_funct(
         sys.argv[1],
-        scheduler = False,
-        controller= True,
+        scheduler = True,
+        controller= False,
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
-        scheduler_backend= "aoccbs", # "ComSat", "occbs", or "aoccbs"
+        scheduler_backend= "ComSat", # "ComSat", "occbs", or "aoccbs"
         assign_via_routing= False, # aoccbs only: use ComSat's Gurobi routing sub-solver to
                               # assign jobs to robots first, instead of requiring every job
                               # pre-pinned to one ATR (see pkg_sche.aoccbs.runner)
@@ -100,7 +100,7 @@ if __name__ == "__main__":
         mpc_backend= "panoc", # "casadi" (IPOPT, no build step); "panoc" or "panoc_light" (both
                               # need build_solver.py, with panoc_builder set to match -- see
                               # build_solver.py); None falls back to solver_type in config/mpc_fast.yaml
-        headless= True, # True = no matplotlib window, no blocking prompt at the end; run
+        headless= False, # True = no matplotlib window, no blocking prompt at the end; run
                               # non-interactively and just return/print a status dict --
                               # see late_threshold_s/stuck_timeout_s below for failure detection
         late_threshold_s= False, # fail the run once a robot is still short of the node it is
@@ -117,7 +117,7 @@ if __name__ == "__main__":
         collision_margin= False, # extra clearance (metres) required on top of the body radius before
                               # the collision check trips: 0.0 = bodies must actually touch,
                               # positive values also fail on near-misses (0.1 = closer than 10 cm).
-        verbose= False, # True = restore the scheduler's/MPC's full per-iteration/per-tick
+        verbose= True,        # True = restore the scheduler's/MPC's full per-iteration/per-tick
                               # console output; False = just the timestamped status lines
                               # (scheduler executing/done/UNSAT, MPC executing/done) -- handy
                               # when running several instances back to back.

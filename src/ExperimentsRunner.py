@@ -125,8 +125,9 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                                 scenario=f'random-{scenario}',
                                 seed=seed,
                                 method=method,
-                                connectedness=8,
-                                simplify=True,
+                                clearance= 0.7, # only for "sampled"
+                                # connectedness=8, # only for "grid"
+                                # simplify=True, # only for "grid
                                 cell_size=2,
                                 out_name=instance_name,
                             )
@@ -181,26 +182,21 @@ if __name__ == "__main__":
     schedulers = ['aoccbs'] # ComSat or aoccbs
 
     maps = ['den312d',
-            # 'den520d',
-            # 'emtpy-16-16',
-            # 'maze-128-128-2',
             # 'maze-32-32-2',
-            # 'random-64-64-8',
             # 'room-32-32-4',
-            # 'room-64-64-8',
-            # 'warehhouse-10-20-10-2-2'
             ]
 
     scenarios = ['1']
 
     n_agents = [
-        4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20
+        13,
+        #14,15,16,17,18,19,20
     ]
 
     seeds = [
         7
     ]
 
-    method = "grid"  # "grid" or "sampled" -- how convert_movingai builds the instance graph
+    method = "sampled"  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
     ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method=method)

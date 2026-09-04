@@ -285,7 +285,7 @@ def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
     problem_config = _build_problem_config(chains, data['ATRs'], am_id, sg_id)
 
     solver_config = SolverConfig(**{
-        'timelimit': 60.0,
+        'timelimit': 600.0,
         'optimality_gap': 0.0,
         'verbosity': 'summary' if verbose else 'silent',
         **(solver_overrides or {}),
