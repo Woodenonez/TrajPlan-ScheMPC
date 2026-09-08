@@ -1,7 +1,7 @@
 from z3 import *
 from .classes import Route
 
-def schedule(the_instance, current_routes):
+def schedule(the_instance, current_routes, time_limit=None):
     # i can now start building the model in z3. i am going to treat this part as a standard job shop problem
     # where each node/edge is a resource, each route a job and the nodes to visit are operations.
     # some operations i.e. the deliveries have time windows
@@ -220,6 +220,11 @@ def schedule(the_instance, current_routes):
         )
     else:
         scheduling = Solver()
+
+    if time_limit is not None:
+        # Z3's "timeout" param is milliseconds; hitting it makes check() return `unknown`
+        # rather than raising, which Compo_slim already treats as "try the next route set".
+        scheduling.set("timeout", int(time_limit * 1000))
 
     # ASSERT THE CONSTRAINTS...
     scheduling.add(

@@ -7,10 +7,12 @@ from .classes import Route
 import math
 # from time import time as tm
 
-def routing(the_instance, previous_routes = []):
+def routing(the_instance, previous_routes = [], time_limit=None):
 
     m = Model('router')
     m.setParam('OutputFlag', 0)
+    if time_limit is not None:
+        m.setParam('TimeLimit', time_limit)
 
     # make lists with vehicles and task names to declare gurobi variables
     vehicles = the_instance.ATRs
