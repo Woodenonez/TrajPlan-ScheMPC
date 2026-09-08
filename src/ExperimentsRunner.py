@@ -18,7 +18,7 @@ results_csv_path = os.path.join(results_dir, "experiments_results.csv")
 MPC_REASON_LABELS = {"late": "late_threshold"}
 
 RESULT_FIELDS = [
-    "instance", "map", "scenario", "n_agents", "seed", "method",
+    "scheduler", "map", "scenario", "n_agents", "seed", "method",
     "scheduler_success", "total_travel_distance", "makespan",
     "mpc_success", "mpc_failure_reason", "simulation_runtime_s",
     "n_nodes_compared", "n_nodes_missing",
@@ -110,7 +110,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
 
                         instance_name = f'{map}_scenario-{scenario}_{n_agent}_{seed}'
                         row = {
-                            "instance": instance_name, "map": map, "scenario": scenario,
+                            "scheduler": scheduler, "map": map, "scenario": scenario,
                             "n_agents": n_agent, "seed": seed, "method": method,
                             "scheduler_success": 0, "total_travel_distance": "", "makespan": "",
                             "mpc_success": "", "mpc_failure_reason": "", "simulation_runtime_s": "",
