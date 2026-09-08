@@ -120,19 +120,30 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
 
                         try:
                             # create instance
-                            convert_movingai(
-                                map_name=map,
-                                n_agents=n_agent,
-                                scenario=f'random-{scenario}',
-                                seed=seed,
-                                method=method,
-                                clearance= 0.7, # only for "sampled"
-                                density= 0.1, # only for "sampled"
-                                # connectedness=4, # only for "grid"
-                                # simplify=True, # only for "grid
-                                cell_size=2,
-                                out_name=instance_name,
-                            )
+                            if method == "grid":
+                                convert_movingai(
+                                    map_name=map,
+                                    n_agents=n_agent,
+                                    scenario=f'random-{scenario}',
+                                    seed=seed,
+                                    method=method,
+                                    connectedness=4, # only for "grid"
+                                    simplify=True, # only for "grid
+                                    cell_size=2,
+                                    out_name=instance_name,
+                                )
+                            elif method == "sample":
+                                convert_movingai(
+                                    map_name=map,
+                                    n_agents=n_agent,
+                                    scenario=f'random-{scenario}',
+                                    seed=seed,
+                                    method=method,
+                                    clearance=0.7,  # only for "sampled"
+                                    density=0.1,  # only for "sampled"
+                                    cell_size=2,
+                                    out_name=instance_name,
+                                )
 
                             result = general_funct(
                                 instance_name,
@@ -187,22 +198,24 @@ if __name__ == "__main__":
 
     schedulers = ['aoccbs'] # ComSat, occbs, aoccbs, or pp_sipp
 
-    maps = ['den312d',
-            # 'maze-32-32-2',
+    maps = [
+            # 'den312d',
+            'maze-32-32-2',
             # 'room-32-32-4',
             ]
 
     scenarios = ['1']
 
     n_agents = [
-        # 4,5,6,7,8,9,10,11,12,
-        13,14,15,16,17,18,19,20
+        4,
+        # 5,6,7,8,9,10,11,12,
+        # 13,14,15,16,17,18,19,20
     ]
 
     seeds = [
         7
     ]
 
-    method = "sampled"  # "grid" or "sampled" -- how convert_movingai builds the instance graph
+    method = "grid"  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
     ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method=method)

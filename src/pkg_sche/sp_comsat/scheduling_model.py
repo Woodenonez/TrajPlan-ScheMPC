@@ -213,9 +213,9 @@ def schedule(the_instance, current_routes):
             # +
             # encourage vehicle to be as fast as possible
             Sum([
-                visit_node[i_index][j]
+                visit_node[i_index][len(routes_plus_idle)-1]
                 for i_index, i in enumerate(routes_plus_idle)
-                for j, _ in enumerate(i.nodes)
+                # for j, _ in enumerate(i.nodes)
             ])
         )
     else:
