@@ -90,8 +90,16 @@ def build_instance(problem):
     return The_Instance, ATRs
 
 
-def Compo_slim(problem, verbose=False):
-
+def Compo_slim(problem, verbose=False, timeout=None):
+    """
+    timeout: If given, the per-call time limit (seconds) handed to each sub-solver invocation --
+        Gurobi's `TimeLimit` for routing and path-changing, Z3's `timeout` for scheduling. It is
+        not a budget for the whole CEGAR loop, which may call these several times (up to
+        `routes_bound` route sets); a sub-solver that hits its limit without a full answer
+        contributes an `unknown`/best-incumbent result, which the loop already treats the same
+        way it treats an UNSAT sub-problem (try the next route set). `None` (default) leaves
+        every sub-solver uncapped except path-changing, which keeps its own 30s default.
+    """
     if verbose:
         print('COMPOSITIONAL ALGORITHM #### SLIM ####')
         print('instance',problem)
@@ -129,7 +137,7 @@ def Compo_slim(problem, verbose=False):
         # let's solve the routing problem
         routing_start = tm()
         routing_feasibility, current_routes, routes_solution = routing(
-                                                    The_Instance, previous_routes
+                                                    The_Instance, previous_routes, time_limit=timeout
                                                     )
         routing_end = tm()
 
@@ -148,7 +156,7 @@ def Compo_slim(problem, verbose=False):
             break
 
         schedule_start = tm()
-        schedule_feasibility, node_sequence, edge_sequence = schedule(The_Instance,current_routes)
+        schedule_feasibility, node_sequence, edge_sequence = schedule(The_Instance,current_routes,time_limit=timeout)
         schedule_end = tm()
 
         ########### TEST #############
@@ -188,7 +196,8 @@ def Compo_slim(problem, verbose=False):
 
             path_change_start = tm()
             paths_changing_feasibility, paths_changing_solution, new_paths = changer(
-                The_Instance.graph, current_paths, previous_paths
+                The_Instance.graph, current_paths, previous_paths,
+                time_limit=timeout if timeout is not None else 30
             )
             path_change_end = tm()
 
@@ -236,7 +245,7 @@ def Compo_slim(problem, verbose=False):
                     #     print(i.display())
 
                     sched_2_start = tm()
-                    schedule_feasibility, node_sequence, edge_sequence = schedule(The_Instance,current_routes)
+                    schedule_feasibility, node_sequence, edge_sequence = schedule(The_Instance,current_routes,time_limit=timeout)
                     sched_2_end = tm()
 
                     #### TEST ###########

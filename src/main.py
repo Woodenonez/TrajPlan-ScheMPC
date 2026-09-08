@@ -47,7 +47,8 @@ def compute_makespan(solution):
 def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False,
                   scheduler_backend="ComSat", mpc_backend=None, assign_via_routing=False,
                   first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
-                  collision_check=True, collision_margin=0.0, verbose=False, show_initial_state=False):
+                  collision_check=True, collision_margin=0.0, verbose=False, show_initial_state=False,
+                  scheduler_timeout_s=None):
     """
     verbose: If False (default), the scheduler and MPC loop only print a handful of
         timestamped status lines (scheduler executing/done/UNSAT, MPC executing/done).
@@ -58,6 +59,14 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         and each robot's start node -- plus its final node, when that's determinable without
         running the scheduler -- as soon as this function is called, before the scheduler (or
         anything else) starts computing. Blocks until the plot window is closed.
+    scheduler_timeout_s: If given, a timeout (seconds) passed to whichever scheduler_backend runs
+        -- "ComSat", "aoccbs", or "pp_sipp" (not "occbs", which exposes none). Its exact meaning
+        is backend-specific: for "ComSat" it is the per-sub-solver-call limit handed to every
+        Gurobi/Z3 invocation in the CEGAR loop (see `Compo_slim`'s docstring); for "aoccbs" it is
+        AOC-CBS's own anytime-search `timelimit`; for "pp_sipp" it is a wall-clock budget for the
+        whole priority sweep, checked between robots. `None` (default) leaves each backend at its
+        own default (uncapped for "ComSat"'s routing/scheduling, 60s for "aoccbs", uncapped for
+        "pp_sipp").
     """
     if show_initial_state:
         from pkg_motion_plan.initial_state_plot import plot_initial_state
@@ -70,17 +79,20 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         status(f"Scheduler executing ({scheduler_backend}, problem={problem!r})")
         if scheduler_backend == "ComSat":
             from pkg_sche.sp_comsat.Compo_slim import Compo_slim
-            instance, optimum, running_time, len_previous_routes, paths_changed, solution = Compo_slim(problem, verbose=verbose)
+            instance, optimum, running_time, len_previous_routes, paths_changed, solution = Compo_slim(
+                problem, verbose=verbose, timeout=scheduler_timeout_s)
         elif scheduler_backend == "occbs":
             from pkg_sche.occbs.runner import OCCBS
             solution, _ = OCCBS(problem, verbose=verbose)
         elif scheduler_backend == "aoccbs":
             from pkg_sche.aoccbs.runner import AOCCBS
             solution, _ = AOCCBS(problem, assign_via_routing=assign_via_routing,
-                                  first_solution_only=first_solution_only, verbose=verbose)
+                                  first_solution_only=first_solution_only, verbose=verbose,
+                                  timeout=scheduler_timeout_s)
         elif scheduler_backend == "pp_sipp":
             from pkg_sche.pp_sipp.runner import PP_SIPP
-            solution, _ = PP_SIPP(problem, assign_via_routing=assign_via_routing, verbose=verbose)
+            solution, _ = PP_SIPP(problem, assign_via_routing=assign_via_routing, verbose=verbose,
+                                   timeout=scheduler_timeout_s)
         else:
             raise ValueError(f"unknown scheduler_backend {scheduler_backend!r}")
 

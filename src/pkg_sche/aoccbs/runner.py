@@ -255,7 +255,8 @@ def _extract_schedule(joint_plan, agent_map: dict, state_graph) -> dict:
 
 def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
           solver_overrides: dict = None, workers: int = None, verbose: bool = True,
-          assign_via_routing: bool = False, first_solution_only: bool = False) -> tuple:
+          assign_via_routing: bool = False, first_solution_only: bool = False,
+          timeout: float = None) -> tuple:
     """Entry point mirroring `OCCBS`/`Compo_slim`: returns (solution, stats).
 
     `assign_via_routing` lifts the usual "every job already pinned to one robot" restriction
@@ -264,7 +265,11 @@ def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
 
     `first_solution_only` returns as soon as AOC-CBS finds any feasible joint plan instead of
     running its normal anytime search out to `solver_overrides['optimality_gap']`/`'timelimit'`
-    (defaulted below to 0.0/600s, i.e. run to proven optimality or 10 minutes) -- see `_solve`.
+    (defaulted below to 0.0/60s) -- see `_solve`.
+
+    `timeout` sets that default `'timelimit'` (seconds); it is overridden by an explicit
+    `solver_overrides['timelimit']` if both are given. `_solve` raises `NoSolution` if AOC-CBS
+    has found nothing by the time it hits this limit.
     """
     with open(f"{PROJECT_ROOT}/data/test_cases/{problem}.json") as f:
         data = json.load(f)
@@ -285,7 +290,7 @@ def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
     problem_config = _build_problem_config(chains, data['ATRs'], am_id, sg_id)
 
     solver_config = SolverConfig(**{
-        'timelimit': 60.0,
+        'timelimit': timeout if timeout is not None else 60.0,
         'optimality_gap': 0.0,
         'verbosity': 'summary' if verbose else 'silent',
         **(solver_overrides or {}),

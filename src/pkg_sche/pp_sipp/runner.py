@@ -88,7 +88,7 @@ def _targets_per_sg(agents: dict) -> dict:
 
 def PP_SIPP(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
            priority_order: list = None, solver_overrides: dict = None, workers: int = None,
-           verbose: bool = True, assign_via_routing: bool = False) -> tuple:
+           verbose: bool = True, assign_via_routing: bool = False, timeout: float = None) -> tuple:
     """Entry point mirroring `AOCCBS`/`OCCBS`/`Compo_slim`: returns (solution, stats).
 
     `priority_order` fixes the robot planning order; a robot's SIPP plan avoids every
@@ -100,6 +100,12 @@ def PP_SIPP(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
     `assign_via_routing` has the same meaning as on `AOCCBS`: it lifts the usual "every job
     already pinned to one robot" restriction by running sp_comsat's Gurobi routing sub-solver
     first to decide the assignment (see `pkg_sche.aoccbs.runner._robot_task_specs_via_routing`).
+
+    `timeout` is a wall-clock budget (seconds) for the whole priority sweep, checked between
+    robots. Unlike `AOCCBS`'s `timelimit`, there is nothing here to hand it to: each robot's SIPP
+    call is a single bounded shortest-path search, not an anytime loop, so it cannot be cut off
+    mid-search -- `timeout` only stops the sweep from starting another robot once the budget is
+    already spent, raising `NoSolution` the same way a robot with no feasible SIPP path does.
     """
     with open(f"{PROJECT_ROOT}/data/test_cases/{problem}.json") as f:
         data = json.load(f)
@@ -142,6 +148,10 @@ def PP_SIPP(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
     t0 = time.time()
     plans = {}
     for i, agent_id in enumerate(order):
+        if timeout is not None and time.time() - t0 > timeout:
+            raise NoSolution(
+                f"Prioritized planning exceeded its timeout ({timeout}s) after planning "
+                f"{i} of {len(order)} robots; priority order was {order}")
         plan = sipp.SIPP_with_collision_manager(agent_id=agent_id, cm=cm)
         if plan is None:
             raise NoSolution(

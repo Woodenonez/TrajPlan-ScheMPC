@@ -2,11 +2,11 @@ from z3 import *
 from gurobipy import *
 from .classes import Path
 
-def changer(graph, paths_combo, previous_paths=[]):
+def changer(graph, paths_combo, previous_paths=[], time_limit=30):
 
     m = Model('paths_changer')
     m.setParam('OutputFlag', 0)
-    m.setParam('TimeLimit', 30)
+    m.setParam('TimeLimit', time_limit)
     use_node = {}
     for route in paths_combo:
         for pair in paths_combo[route]:
