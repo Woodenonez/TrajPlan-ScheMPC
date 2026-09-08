@@ -19,7 +19,7 @@ MPC_REASON_LABELS = {"late": "late_threshold"}
 
 RESULT_FIELDS = [
     "instance", "map", "scenario", "n_agents", "seed", "method",
-    "scheduler_success",
+    "scheduler_success", "total_travel_distance",
     "mpc_success", "mpc_failure_reason",
     "n_nodes_compared", "n_nodes_missing",
     "mean_eta_diff_s", "max_abs_eta_diff_s",
@@ -112,7 +112,8 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                         row = {
                             "instance": instance_name, "map": map, "scenario": scenario,
                             "n_agents": n_agent, "seed": seed, "method": method,
-                            "scheduler_success": 0, "mpc_success": "", "mpc_failure_reason": "",
+                            "scheduler_success": 0, "total_travel_distance": "",
+                            "mpc_success": "", "mpc_failure_reason": "",
                             "n_nodes_compared": 0, "n_nodes_missing": "",
                             "mean_eta_diff_s": "", "max_abs_eta_diff_s": "", "error": "",
                         }
@@ -126,7 +127,8 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                                 seed=seed,
                                 method=method,
                                 clearance= 0.7, # only for "sampled"
-                                # connectedness=8, # only for "grid"
+                                density= 0.1, # only for "sampled"
+                                # connectedness=4, # only for "grid"
                                 # simplify=True, # only for "grid
                                 cell_size=2,
                                 out_name=instance_name,
@@ -139,7 +141,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                                 naive_tracker=False,  # True = proportional baseline, False = NMPC (see mpc_backend)
                                 ignore_speed_ref=False,
                                 recording=False,
-                                scheduler_backend=scheduler,  # "ComSat", "occbs", or "aoccbs"
+                                scheduler_backend=scheduler,  # "ComSat", "occbs", "aoccbs", or "pp_sipp"
                                 assign_via_routing=False,
                                 first_solution_only=False,
                                 mpc_backend="panoc",
@@ -159,6 +161,8 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
 
                             merged = None
                             if scheduler_success:
+                                row["total_travel_distance"] = result.get("total_travel_distance", "")
+
                                 mpc_status = result.get("status")
                                 mpc_success = mpc_status == "success"
                                 row["mpc_success"] = int(mpc_success)
@@ -179,7 +183,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
 
 if __name__ == "__main__":
 
-    schedulers = ['aoccbs'] # ComSat or aoccbs
+    schedulers = ['aoccbs'] # ComSat, occbs, aoccbs, or pp_sipp
 
     maps = ['den312d',
             # 'maze-32-32-2',
@@ -189,8 +193,8 @@ if __name__ == "__main__":
     scenarios = ['1']
 
     n_agents = [
-        13,
-        #14,15,16,17,18,19,20
+        # 4,5,6,7,8,9,10,11,12,
+        13,14,15,16,17,18,19,20
     ]
 
     seeds = [
