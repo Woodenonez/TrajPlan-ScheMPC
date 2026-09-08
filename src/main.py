@@ -43,6 +43,9 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
             from pkg_sche.aoccbs.runner import AOCCBS
             solution, _ = AOCCBS(problem, assign_via_routing=assign_via_routing,
                                   first_solution_only=first_solution_only, verbose=verbose)
+        elif scheduler_backend == "pp_sipp":
+            from pkg_sche.pp_sipp.runner import PP_SIPP
+            solution, _ = PP_SIPP(problem, assign_via_routing=assign_via_routing, verbose=verbose)
         else:
             raise ValueError(f"unknown scheduler_backend {scheduler_backend!r}")
 
@@ -99,7 +102,7 @@ if __name__ == "__main__":
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
-        scheduler_backend= "ComSat", # "ComSat", "occbs", or "aoccbs"
+        scheduler_backend= "aoccbs", # "ComSat", "occbs", "aoccbs", or "pp_sipp"
         assign_via_routing= False, # aoccbs only: use ComSat's Gurobi routing sub-solver to
                               # assign jobs to robots first, instead of requiring every job
                               # pre-pinned to one ATR (see pkg_sche.aoccbs.runner)
