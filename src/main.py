@@ -2,6 +2,7 @@ import os
 import pathlib
 import json
 import csv
+import math
 import sys
 
 from status_log import status
@@ -10,6 +11,26 @@ from status_log import status
 project_root = pathlib.Path(__file__).resolve().parents[1]
 src_path = os.path.join(project_root, "src")
 data_path = os.path.join(project_root, "data")
+
+# Backends whose solution's node_id is confirmed to be a raw key into a test case's
+# test_data['nodes'] dict (see Compo_slim.py, pkg_sche.aoccbs.runner, pkg_sche.pp_sipp.runner) --
+# total travel distance is only computed/reported for these.
+DISTANCE_SCHEDULER_BACKENDS = ("ComSat", "aoccbs", "pp_sipp")
+
+
+def compute_total_travel_distance(solution, nodes):
+    """Sum of Euclidean segment lengths between consecutive scheduled nodes, over all robots.
+
+    `solution` is {robot_id: [(node_id, ETA), ...]}, as returned by a scheduler backend.
+    `nodes` is a test case's `test_data['nodes']` dict (node_id -> {'x':, 'y':, ...}).
+    """
+    total = 0.0
+    for timetable in solution.values():
+        for (node_a, _), (node_b, _) in zip(timetable, timetable[1:]):
+            xa, ya = nodes[node_a]['x'], nodes[node_a]['y']
+            xb, yb = nodes[node_b]['x'], nodes[node_b]['y']
+            total += math.hypot(xb - xa, yb - ya)
+    return total
 
 
 def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False,
@@ -30,6 +51,8 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
     if show_initial_state:
         from pkg_motion_plan.initial_state_plot import plot_initial_state
         plot_initial_state(problem)
+
+    total_travel_distance = None
 
     if scheduler:
         status(f"Scheduler executing ({scheduler_backend}, problem={problem!r})")
@@ -66,10 +89,11 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         with open(f"{data_path}/test_cases/{problem}.json",'r') as read_file:
             data = json.load(read_file)
             ATRs = data['ATRs']
+            node_coords = data['test_data']['nodes']
         robot_starts = {
             key:[
-                data['test_data']['nodes'][value]['x'],
-                data['test_data']['nodes'][value]['y'],
+                node_coords[value]['x'],
+                node_coords[value]['y'],
                 -1.57
             ]
             for key,value in ATRs.items()
@@ -77,15 +101,22 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         with open(f"{data_path}/schedule_demo2_data/robot_start.json", 'w') as write_file:
             json.dump(robot_starts, write_file, indent=4)
 
+        if scheduler_backend in DISTANCE_SCHEDULER_BACKENDS:
+            total_travel_distance = compute_total_travel_distance(solution, node_coords)
+            status(f"Total travel distance ({scheduler_backend}): {total_travel_distance:.2f}")
+
     if controller:
         from run_mpc import run_mpc
         with open(f"{data_path}/test_cases/{problem}.json",'r') as read_file:
             data = json.load(read_file)
             EnvFolder = data['test_data']['Environment']
-        return run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref,
+        result = run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref,
                 recording=recording, mpc_backend=mpc_backend, headless=headless,
                 late_threshold_s=late_threshold_s, stuck_timeout_s=stuck_timeout_s,
                 collision_check=collision_check, collision_margin=collision_margin, verbose=verbose)
+        if total_travel_distance is not None:
+            result["total_travel_distance"] = total_travel_distance
+        return result
     return None
 
 if __name__ == "__main__":
@@ -138,5 +169,3 @@ if __name__ == "__main__":
     )
     if result is not None and result["status"] != "success":
         raise SystemExit(f"[main] run failed: {result}")
-
-
