@@ -19,8 +19,8 @@ MPC_REASON_LABELS = {"late": "late_threshold"}
 
 RESULT_FIELDS = [
     "instance", "map", "scenario", "n_agents", "seed", "method",
-    "scheduler_success", "total_travel_distance",
-    "mpc_success", "mpc_failure_reason",
+    "scheduler_success", "total_travel_distance", "makespan",
+    "mpc_success", "mpc_failure_reason", "simulation_runtime_s",
     "n_nodes_compared", "n_nodes_missing",
     "mean_eta_diff_s", "max_abs_eta_diff_s",
     "error",
@@ -112,8 +112,8 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                         row = {
                             "instance": instance_name, "map": map, "scenario": scenario,
                             "n_agents": n_agent, "seed": seed, "method": method,
-                            "scheduler_success": 0, "total_travel_distance": "",
-                            "mpc_success": "", "mpc_failure_reason": "",
+                            "scheduler_success": 0, "total_travel_distance": "", "makespan": "",
+                            "mpc_success": "", "mpc_failure_reason": "", "simulation_runtime_s": "",
                             "n_nodes_compared": 0, "n_nodes_missing": "",
                             "mean_eta_diff_s": "", "max_abs_eta_diff_s": "", "error": "",
                         }
@@ -162,6 +162,8 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                             merged = None
                             if scheduler_success:
                                 row["total_travel_distance"] = result.get("total_travel_distance", "")
+                                row["makespan"] = result.get("makespan", "")
+                                row["simulation_runtime_s"] = result.get("simulation_runtime_s", "")
 
                                 mpc_status = result.get("status")
                                 mpc_success = mpc_status == "success"

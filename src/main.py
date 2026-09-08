@@ -4,6 +4,7 @@ import json
 import csv
 import math
 import sys
+import time
 
 from status_log import status
 
@@ -33,6 +34,16 @@ def compute_total_travel_distance(solution, nodes):
     return total
 
 
+def compute_makespan(solution):
+    """Latest scheduled arrival across every robot -- the time needed to execute all routes.
+
+    `solution` is {robot_id: [(node_id, ETA), ...]}. Backend-agnostic: every backend's ETA is
+    a real, finite arrival time -- ComSat's exported `visit_node` is never forced to the
+    scheduling model's `Big_number` sentinel, only its separate (unexported) `leave_node` is.
+    """
+    return max(eta for timetable in solution.values() for _, eta in timetable)
+
+
 def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False,
                   scheduler_backend="ComSat", mpc_backend=None, assign_via_routing=False,
                   first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
@@ -53,6 +64,7 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         plot_initial_state(problem)
 
     total_travel_distance = None
+    makespan = None
 
     if scheduler:
         status(f"Scheduler executing ({scheduler_backend}, problem={problem!r})")
@@ -105,17 +117,26 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
             total_travel_distance = compute_total_travel_distance(solution, node_coords)
             status(f"Total travel distance ({scheduler_backend}): {total_travel_distance:.2f}")
 
+        makespan = compute_makespan(solution)
+        status(f"Makespan ({scheduler_backend}): {makespan:.2f}")
+
     if controller:
         from run_mpc import run_mpc
         with open(f"{data_path}/test_cases/{problem}.json",'r') as read_file:
             data = json.load(read_file)
             EnvFolder = data['test_data']['Environment']
+        sim_start = time.perf_counter()
         result = run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref,
                 recording=recording, mpc_backend=mpc_backend, headless=headless,
                 late_threshold_s=late_threshold_s, stuck_timeout_s=stuck_timeout_s,
                 collision_check=collision_check, collision_margin=collision_margin, verbose=verbose)
+        simulation_runtime_s = time.perf_counter() - sim_start
+        status(f"MPC simulation wall-clock runtime: {simulation_runtime_s:.2f}s")
+        result["simulation_runtime_s"] = simulation_runtime_s
         if total_travel_distance is not None:
             result["total_travel_distance"] = total_travel_distance
+        if makespan is not None:
+            result["makespan"] = makespan
         return result
     return None
 
