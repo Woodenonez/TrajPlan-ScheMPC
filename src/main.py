@@ -167,6 +167,9 @@ if __name__ == "__main__":
         ignore_speed_ref= False,
         recording= False,
         scheduler_backend= "aoccbs", # "ComSat", "occbs", "aoccbs", or "pp_sipp"
+        scheduler_timeout_s= None, # timeout (seconds) for "ComSat"/"aoccbs"/"pp_sipp" (not
+                              # "occbs", which has none) -- see general_funct's docstring for
+                              # what it means on each backend. None = each backend's own default.
         assign_via_routing= False, # aoccbs only: use ComSat's Gurobi routing sub-solver to
                               # assign jobs to robots first, instead of requiring every job
                               # pre-pinned to one ATR (see pkg_sche.aoccbs.runner)
