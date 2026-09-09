@@ -296,6 +296,15 @@ def routing(the_instance, previous_routes = [], time_limit=None):
     # print(m.getVarByName('direct_travel[0,job_1_1,job_1_1]').X)
     # print('INFEASIBLE',m.status == GRB.INFEASIBLE)
     # print('OPTIMAL',m.status == GRB.OPTIMAL)
+    if m.status == GRB.TIME_LIMIT and m.SolCount == 0:
+        # Hit time_limit with no incumbent at all -- there is no solution to extract (accessing
+        # .X below would raise an opaque AttributeError). Surface this plainly instead of letting
+        # the caller misread a stale/garbage result as a real routing solution.
+        raise TimeoutError(
+            f"ComSat routing solver (Gurobi) hit its {time_limit}s time limit without finding "
+            f"any feasible solution (status TIME_LIMIT, SolCount=0)."
+        )
+
     routes_plus = []
     # this list will be use to store the current solution for future runs of the solver
     current_solution = []
