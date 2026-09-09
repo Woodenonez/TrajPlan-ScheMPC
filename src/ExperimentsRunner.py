@@ -19,7 +19,7 @@ MPC_REASON_LABELS = {"late": "late_threshold"}
 
 RESULT_FIELDS = [
     "scheduler", "map", "scenario", "n_agents", "seed", "method",
-    "scheduler_success", "total_travel_distance", "makespan",
+    "scheduler_success", "total_travel_distance", "makespan", "sum_of_costs",
     "mpc_success", "mpc_failure_reason", "simulation_runtime_s",
     "n_nodes_compared", "n_nodes_missing",
     "mean_eta_diff_s", "max_abs_eta_diff_s",
@@ -62,7 +62,28 @@ def _schedule_diff_stats(merged):
     }
 
 
+def _migrate_results_header():
+    """Rewrite experiments_results.csv in place if it was written with an older RESULT_FIELDS.
+
+    Rows are appended to that file across runs, so a column added to RESULT_FIELDS would
+    otherwise be appended past the stored header and silently misalign every new row against
+    the old ones. Existing rows keep their values and get an empty cell for each new column."""
+    if not os.path.exists(results_csv_path):
+        return
+    with open(results_csv_path, newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames == RESULT_FIELDS:
+            return
+        old_rows = list(reader)
+    with open(results_csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=RESULT_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        for old_row in old_rows:
+            writer.writerow({field: old_row.get(field, "") or "" for field in RESULT_FIELDS})
+
+
 def _write_result_row(row):
+    _migrate_results_header()
     file_exists = os.path.exists(results_csv_path)
     with open(results_csv_path, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=RESULT_FIELDS)
@@ -72,9 +93,9 @@ def _write_result_row(row):
 
 
 def _write_instance_csv(instance_name, summary_row, merged):
-    """Per-instance CSV. One header line naming all 18 columns, then the summary line --
-    the same fields written to experiments_results.csv, filling columns 1-13 only -- then
-    one line per scheduled node in columns 14-18: the full planned-vs-actual breakdown,
+    """Per-instance CSV. One header line naming all 23 columns, then the summary line --
+    the same fields written to experiments_results.csv, filling columns 1-18 only -- then
+    one line per scheduled node in columns 19-23: the full planned-vs-actual breakdown,
     i.e. schedule.csv and Actual_<instance_name>.csv joined on (robot_id, node_id).
     The summary is written once rather than repeated on every node line."""
     node_fields = ["robot_id", "node_id", "ETA_planned", "ETA_actual", "ETA_diff"]
@@ -113,6 +134,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                             "scheduler": scheduler, "map": map, "scenario": scenario,
                             "n_agents": n_agent, "seed": seed, "method": method,
                             "scheduler_success": 0, "total_travel_distance": "", "makespan": "",
+                            "sum_of_costs": "",
                             "mpc_success": "", "mpc_failure_reason": "", "simulation_runtime_s": "",
                             "n_nodes_compared": 0, "n_nodes_missing": "",
                             "mean_eta_diff_s": "", "max_abs_eta_diff_s": "", "error": "",
@@ -174,6 +196,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                             if scheduler_success:
                                 row["total_travel_distance"] = result.get("total_travel_distance", "")
                                 row["makespan"] = result.get("makespan", "")
+                                row["sum_of_costs"] = result.get("sum_of_costs", "")
                                 row["simulation_runtime_s"] = result.get("simulation_runtime_s", "")
 
                                 mpc_status = result.get("status")
