@@ -1,4 +1,5 @@
 import json
+import math
 from typing import TypedDict, Optional, Callable
 
 import numpy as np
@@ -124,6 +125,46 @@ class GeometricMap:
         y_min = min([x[1] for x in self._boundary_coords])
         y_max = max([x[1] for x in self._boundary_coords])
         return x_min, x_max, y_min, y_max
+
+    def boundary_wall_obstacles(self, wall_depth: Optional[float] = None) -> list[list[PathNode]]:
+        """One convex quad "wall" obstacle per boundary edge, covering the region beyond it.
+
+        The map boundary is otherwise never handed to the NMPC as an obstacle -- only
+        `obstacle_coords_list` is (see `run_mpc.py`) -- so a robot has no built-in incentive to
+        stay inside it; only a post-hoc collision check catches one that has already left the
+        map. This lets a robot starting close to an unwalled boundary drift out through it
+        entirely unopposed, since nothing marks that direction as blocked. Turning each boundary
+        edge into an outward-facing wall reuses the exact same avoidance machinery (closest-N
+        selection, convex halfspace representation) that already keeps a robot out of the
+        interior obstacles -- `polygon_halfspace_representation` builds its constraint from
+        `scipy.ConvexHull`, which is indifferent to vertex order, so the walls' winding needs no
+        special handling.
+
+        wall_depth: How far outward each wall extends, in metres. Defaults to the boundary's own
+            larger extent (width or height) plus a metre, comfortably enough to block the
+            outward direction regardless of the boundary's shape.
+        """
+        pts = self._boundary_coords
+        n = len(pts)
+        if wall_depth is None:
+            x_min, x_max, y_min, y_max = self.get_boundary_scope()
+            wall_depth = max(x_max - x_min, y_max - y_min) + 1.0
+        # Shoelace sign tells which side of each directed edge is "outward" -- only the sign
+        # matters, so there's no need to divide by 2 for the true signed area.
+        signed_area = sum(pts[i][0] * pts[(i + 1) % n][1] - pts[(i + 1) % n][0] * pts[i][1] for i in range(n))
+        outward_sign = 1.0 if signed_area > 0 else -1.0
+        walls = []
+        for i in range(n):
+            x0, y0 = pts[i]
+            x1, y1 = pts[(i + 1) % n]
+            ex, ey = x1 - x0, y1 - y0
+            edge_len = math.hypot(ex, ey)
+            if edge_len == 0:
+                continue
+            nx, ny = outward_sign * ey / edge_len, outward_sign * -ex / edge_len
+            ox, oy = nx * wall_depth, ny * wall_depth
+            walls.append([(x0, y0), (x1, y1), (x1 + ox, y1 + oy), (x0 + ox, y0 + oy)])
+        return walls
 
     def get_occupancy_map(self, rescale:int=100) -> np.ndarray:
         """

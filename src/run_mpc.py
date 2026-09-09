@@ -253,7 +253,11 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     gpc.load_map_from_json(map_path, inflation_margin=config_robot.vehicle_width+config_robot.vehicle_margin)
     robot_ids = gpc.robot_ids if robot_ids is None else robot_ids
     boundary_coords = gpc.current_map.boundary_coords
-    static_obstacles = gpc.inflated_map.obstacle_coords_list
+    ### The interior obstacle list plus a wall obstacle per boundary edge, so the NMPC itself
+    ### is discouraged from driving off the map, not just caught doing so by the collision
+    ### check below -- see `GeometricMap.boundary_wall_obstacles`'s docstring for why this is
+    ### needed even though the map boundary is already checked post-hoc.
+    static_obstacles = gpc.inflated_map.obstacle_coords_list + gpc.inflated_map.boundary_wall_obstacles()
 
     ### Set up robots
     robot_manager = RobotManager()
