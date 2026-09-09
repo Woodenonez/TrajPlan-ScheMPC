@@ -153,6 +153,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                                 ignore_speed_ref=False,
                                 recording=False,
                                 scheduler_backend=scheduler,  # "ComSat", "occbs", "aoccbs", or "pp_sipp"
+                                scheduler_timeout_s=60,
                                 assign_via_routing=False,
                                 first_solution_only=False,
                                 mpc_backend="panoc",
@@ -196,7 +197,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
 
 if __name__ == "__main__":
 
-    schedulers = ['aoccbs'] # ComSat, occbs, aoccbs, or pp_sipp
+    schedulers = ['aoccbs','ComSat','pp_sipp'] # ComSat, occbs, aoccbs, or pp_sipp
 
     maps = [
             # 'den312d',
@@ -207,9 +208,7 @@ if __name__ == "__main__":
     scenarios = ['1']
 
     n_agents = [
-        4,
-        # 5,6,7,8,9,10,11,12,
-        # 13,14,15,16,17,18,19,20
+        4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20
     ]
 
     seeds = [

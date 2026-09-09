@@ -162,12 +162,12 @@ if __name__ == "__main__":
     result = general_funct(
         sys.argv[1],
         scheduler = True,
-        controller= False,
+        controller= True,
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
         scheduler_backend= "aoccbs", # "ComSat", "occbs", "aoccbs", or "pp_sipp"
-        scheduler_timeout_s= None, # timeout (seconds) for "ComSat"/"aoccbs"/"pp_sipp" (not
+        scheduler_timeout_s= 60, # timeout (seconds) for "ComSat"/"aoccbs"/"pp_sipp" (not
                               # "occbs", which has none) -- see general_funct's docstring for
                               # what it means on each backend. None = each backend's own default.
         assign_via_routing= False, # aoccbs only: use ComSat's Gurobi routing sub-solver to
@@ -181,13 +181,13 @@ if __name__ == "__main__":
         headless= False, # True = no matplotlib window, no blocking prompt at the end; run
                               # non-interactively and just return/print a status dict --
                               # see late_threshold_s/stuck_timeout_s below for failure detection
-        late_threshold_s= False, # fail the run once a robot is still short of the node it is
+        late_threshold_s= 30, # fail the run once a robot is still short of the node it is
                               # targeting more than this many seconds past that node's
                               # scheduled ETA. None disables the check.
         stuck_timeout_s= False, # fail the run once a robot has not translated more than a couple
                               # centimetres for this many consecutive seconds while active
                               # (excluding in-place `aligning` rotation). None disables the check.
-        collision_check= False, # fail the run as soon as two robot bodies overlap, or a robot body
+        collision_check= True, # fail the run as soon as two robot bodies overlap, or a robot body
                               # overlaps a static obstacle or leaves the map boundary. Robots are
                               # discs of radius `vehicle_width` (config/robot_spec.yaml) and the
                               # test uses the un-inflated map, so this is physical contact, not a
