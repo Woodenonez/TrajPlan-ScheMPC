@@ -62,6 +62,38 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
 # model the same physical footprint.
 DEFAULT_AGENT_RADIUS = 0.35
 
+
+def mpc_matched_agent_radius(config_file: str = "robot_spec.yaml") -> float:
+    """The agent radius that makes AOC-CBS plan the clearance the NMPC actually wants.
+
+    The radius handed to `create_circular_agent` is the *only* clearance knob these backends
+    have: AOC-CBS declares two agents in conflict exactly when their discs overlap, so a plan
+    is guaranteed to keep robot centres at least `2*agent_radius` apart and nothing else --
+    there is no separate temporal padding to add, and padding the emitted ETAs after the fact
+    would not change where two robots pass each other.
+
+    `DEFAULT_AGENT_RADIUS` (0.35) is about the shipped robot's own body radius
+    (`vehicle_width` = 0.35355), so a schedule built with it may route two robots past each
+    other at ~0.7 m centre-to-centre -- inside `casadi_impl`'s fleet safe distance
+    (`2*(vehicle_width + vehicle_margin)` = 1.107 m, where the NMPC's heavy `qfleet_pred` term
+    switches on) and barely outside its critical distance (0.907 m). The tracker then has to
+    buy that clearance back by deviating from the schedule, which shows up as lateness.
+    Planning with `vehicle_width + vehicle_margin` instead makes the planned clearance
+    `2*(vehicle_width + vehicle_margin)`, i.e. exactly the fleet safe distance, so the schedule
+    is one the NMPC can track without fighting it.
+
+    This is a geometric widening of the agents, not a change to the roadmap: every test case in
+    `data/test_cases/` spaces its nodes at least 2 m apart, so it stays well clear of the point
+    where two occupied vertices would overlap and the instance would go infeasible.
+
+    Note that a different radius means a different agent-model id, hence a different (and
+    initially cold) `intersection_intervals` cache under `external/AOC-CBS/cache/` -- the first
+    run at a new radius pays for that preprocessing once.
+    """
+    from configs import CircularRobotSpecification
+    spec = CircularRobotSpecification.from_yaml(f"{PROJECT_ROOT}/config/{config_file}")
+    return spec.vehicle_width + spec.vehicle_margin
+
 # Distance units per second on every edge. sp_comsat and OC-CBS both treat an edge's raw
 # Euclidean length as its travel time (see support_functions.json_parser and occbs.roadmap's
 # docstring); matching that here keeps travel times comparable across all three backends.
@@ -270,6 +302,12 @@ def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
     `timeout` sets that default `'timelimit'` (seconds); it is overridden by an explicit
     `solver_overrides['timelimit']` if both are given. `_solve` raises `NoSolution` if AOC-CBS
     has found nothing by the time it hits this limit.
+
+    `agent_radius` is how much room the plan leaves between robots: AOC-CBS keeps their discs
+    from overlapping, so robot centres stay at least `2*agent_radius` apart. Raise it to get a
+    schedule the NMPC does not have to deviate from to stay safe -- see
+    `mpc_matched_agent_radius`, which returns the value matching the tracker's own fleet safe
+    distance.
     """
     with open(f"{PROJECT_ROOT}/data/test_cases/{problem}.json") as f:
         data = json.load(f)

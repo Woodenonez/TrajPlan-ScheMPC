@@ -101,6 +101,10 @@ def PP_SIPP(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
     already pinned to one robot" restriction by running sp_comsat's Gurobi routing sub-solver
     first to decide the assignment (see `pkg_sche.aoccbs.runner._robot_task_specs_via_routing`).
 
+    `agent_radius` has the same meaning as on `AOCCBS`: SIPP's safe intervals come from the same
+    disc-overlap test, so the plan keeps robot centres at least `2*agent_radius` apart and that
+    radius is the only clearance knob (see `pkg_sche.aoccbs.runner.mpc_matched_agent_radius`).
+
     `timeout` is a wall-clock budget (seconds) for the whole priority sweep, checked between
     robots. Unlike `AOCCBS`'s `timelimit`, there is nothing here to hand it to: each robot's SIPP
     call is a single bounded shortest-path search, not an anytime loop, so it cannot be cut off
