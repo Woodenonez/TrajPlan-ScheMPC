@@ -20,6 +20,11 @@ decided -- every job pinned to exactly one robot, with precedence forming a sing
 (see `_robot_task_specs`, which is `pkg_sche.occbs.runner.robot_task_chains` with each task's
 service time kept instead of discarded). Time windows are not modelled either, matching OC-CBS.
 
+One thing this runner does not take from AOC-CBS is its default search portfolio: the shipped one
+declares no repair heuristics, which leaves the constraint-tree search as the only source of a
+feasible plan and so returns nothing at all on instances with many agents. `DEFAULT_SEARCH_PORTFOLIO`
+below is the same portfolio with TPR switched on; see the comment there.
+
 AOC-CBS is vendored unbuilt into the gitignored `external/AOC-CBS` (its own convention: `pip
 install -e external/AOC-CBS` after cloning; it also needs `sortedcontainers`, which its
 pyproject.toml does not declare). Unlike OC-CBS it needs no separate compile step. It builds its
@@ -45,7 +50,7 @@ import networkx as nx
 
 from aoccbs import paths as aoccbs_paths
 from aoccbs.config.schema import (
-    RunConfig, SolverConfig, ProblemConfig, NamedAgent, AgentConfig,
+    RunConfig, SolverConfig, ProblemConfig, NamedAgent, AgentConfig, Policy,
     extract_plant_spec, extract_problem_spec,
 )
 from aoccbs.solver.aoccbs import AOCCBS as AOCCBSSolver
@@ -61,6 +66,30 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
 # Matches OC-CBS's default `agent_size` (see occbs.runner.DEFAULT_CONFIG), so the two backends
 # model the same physical footprint.
 DEFAULT_AGENT_RADIUS = 0.35
+
+# AOC-CBS's shipped `SolverConfig.search_portfolio` declares `heuristics=()` on all six policies,
+# so its TPR (Tier-Prioritized Repair) heuristic never runs and the *only* way a run acquires a
+# feasible joint plan is for the best-first constraint-tree search to reach a conflict-free leaf.
+# That is fine on a handful of agents and hopeless beyond it: on `test_2` (21 agents, 261 vertices)
+# the shipped portfolio expanded 16k CT nodes in 60s, lifted the lower bound by 0.7 of the ~2138 it
+# started at, and never produced a solution at all, so `_solve` raised NoSolution. TPR builds a
+# feasible plan directly -- it clears the conflicting agents, pins them at their starts and replans
+# them one at a time with SIPP -- so the same instance gets its first solution in ~0.2s and is
+# inside a 0.4% gap within seconds.
+#
+# Every policy carries TPR rather than only some: each runs the repair from its own CT node, and
+# the diversity is what tightens the upper bound. Measured on `test_2` at a 25s budget, TPR on 1 /
+# 2 / 6 policies closed to a 2.5% / 2.3% / 0.4% gap.
+#
+# Selections are AOC-CBS's own; only `heuristics` differs.
+DEFAULT_SEARCH_PORTFOLIO = (
+    Policy(selection="min objective", heuristics=("TPR",)),
+    Policy(selection="min nr collisions", heuristics=("TPR",)),
+    Policy(selection="min collision time", heuristics=("TPR",)),
+    Policy(selection="min objective", heuristics=("TPR",)),
+    Policy(selection="min objective", heuristics=("TPR",)),
+    Policy(selection="min objective", heuristics=("TPR",)),
+)
 
 # Distance units per second on every edge. sp_comsat and OC-CBS both treat an edge's raw
 # Euclidean length as its travel time (see support_functions.json_parser and occbs.roadmap's
@@ -256,7 +285,7 @@ def _extract_schedule(joint_plan, agent_map: dict, state_graph) -> dict:
 def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
           solver_overrides: dict = None, workers: int = None, verbose: bool = True,
           assign_via_routing: bool = False, first_solution_only: bool = False,
-          timeout: float = None) -> tuple:
+          timeout: float = None, optimality_gap: float = 0.0) -> tuple:
     """Entry point mirroring `OCCBS`/`Compo_slim`: returns (solution, stats).
 
     `assign_via_routing` lifts the usual "every job already pinned to one robot" restriction
@@ -270,6 +299,16 @@ def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
     `timeout` sets that default `'timelimit'` (seconds); it is overridden by an explicit
     `solver_overrides['timelimit']` if both are given. `_solve` raises `NoSolution` if AOC-CBS
     has found nothing by the time it hits this limit.
+
+    `optimality_gap` is the *relative* gap against the current lower bound at which the anytime
+    search stops early. It defaults to 0.0, i.e. stop only on a proven optimum, so a run that
+    cannot close the gap always spends its whole `timeout` -- on crowded instances the last
+    percent of the bound is far more expensive than the plan quality it buys, so raise it (0.01
+    is a reasonable start) when a good schedule sooner is worth more than a proven one later.
+
+    The search runs `DEFAULT_SEARCH_PORTFOLIO`, which is AOC-CBS's own portfolio with its TPR
+    repair heuristic switched on; without it the library finds no solution at all on instances
+    with many agents. Pass `solver_overrides['search_portfolio']` to override.
     """
     with open(f"{PROJECT_ROOT}/data/test_cases/{problem}.json") as f:
         data = json.load(f)
@@ -291,8 +330,9 @@ def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
 
     solver_config = SolverConfig(**{
         'timelimit': timeout if timeout is not None else 60.0,
-        'optimality_gap': 0.0,
+        'optimality_gap': optimality_gap,
         'verbosity': 'summary' if verbose else 'silent',
+        'search_portfolio': DEFAULT_SEARCH_PORTFOLIO,
         **(solver_overrides or {}),
     })
 

@@ -48,7 +48,7 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
                   scheduler_backend="ComSat", mpc_backend=None, assign_via_routing=False,
                   first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
                   collision_check=True, collision_margin=0.0, verbose=False, show_initial_state=False,
-                  scheduler_timeout_s=None):
+                  scheduler_timeout_s=None, scheduler_optimality_gap=0.0):
     """
     verbose: If False (default), the scheduler and MPC loop only print a handful of
         timestamped status lines (scheduler executing/done/UNSAT, MPC executing/done).
@@ -68,6 +68,12 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         `timelimit`. For "pp_sipp" it is checked between robots in the priority sweep. `None`
         (default) leaves each backend at its own default (uncapped for "ComSat", 60s for
         "aoccbs", uncapped for "pp_sipp").
+    scheduler_optimality_gap: "aoccbs" only -- the relative gap at which its anytime search
+        stops early. 0.0 (default) means stop only on a proven optimum, so a run that cannot
+        close the gap always spends its whole `scheduler_timeout_s`. On crowded instances the
+        upper bound is usually within a fraction of a percent within seconds and then barely
+        moves, so a small value (0.01) buys back nearly the whole budget for almost no plan
+        quality. Ignored by every other backend.
     """
     if show_initial_state:
         from pkg_motion_plan.initial_state_plot import plot_initial_state
@@ -89,7 +95,8 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
             from pkg_sche.aoccbs.runner import AOCCBS
             solution, _ = AOCCBS(problem, assign_via_routing=assign_via_routing,
                                   first_solution_only=first_solution_only, verbose=verbose,
-                                  timeout=scheduler_timeout_s)
+                                  timeout=scheduler_timeout_s,
+                                  optimality_gap=scheduler_optimality_gap)
         elif scheduler_backend == "pp_sipp":
             from pkg_sche.pp_sipp.runner import PP_SIPP
             solution, _ = PP_SIPP(problem, assign_via_routing=assign_via_routing, verbose=verbose,
@@ -168,6 +175,9 @@ if __name__ == "__main__":
         ignore_speed_ref= False,
         recording= False,
         scheduler_backend= "aoccbs", # "ComSat", "occbs", "aoccbs", or "pp_sipp"
+        scheduler_optimality_gap= 0.0, # aoccbs only: relative gap at which the anytime search
+                              # stops early. 0.0 always spends the whole scheduler_timeout_s;
+                              # 0.01 typically returns in seconds at near-identical quality
         scheduler_timeout_s= None, # timeout (seconds) for "ComSat"/"aoccbs"/"pp_sipp" (not
                               # "occbs", which has none) -- see general_funct's docstring for
                               # what it means on each backend. None = each backend's own default.
