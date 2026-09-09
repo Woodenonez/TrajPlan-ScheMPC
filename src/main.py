@@ -59,14 +59,15 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         and each robot's start node -- plus its final node, when that's determinable without
         running the scheduler -- as soon as this function is called, before the scheduler (or
         anything else) starts computing. Blocks until the plot window is closed.
-    scheduler_timeout_s: If given, a timeout (seconds) passed to whichever scheduler_backend runs
-        -- "ComSat", "aoccbs", or "pp_sipp" (not "occbs", which exposes none). Its exact meaning
-        is backend-specific: for "ComSat" it is the per-sub-solver-call limit handed to every
-        Gurobi/Z3 invocation in the CEGAR loop (see `Compo_slim`'s docstring); for "aoccbs" it is
-        AOC-CBS's own anytime-search `timelimit`; for "pp_sipp" it is a wall-clock budget for the
-        whole priority sweep, checked between robots. `None` (default) leaves each backend at its
-        own default (uncapped for "ComSat"'s routing/scheduling, 60s for "aoccbs", uncapped for
-        "pp_sipp").
+    scheduler_timeout_s: If given, an overall wall-clock budget (seconds) for whichever
+        scheduler_backend runs -- "ComSat", "aoccbs", or "pp_sipp" (not "occbs", which exposes
+        none). For "ComSat" this bounds the whole CEGAR loop: each Gurobi/Z3 sub-solver call is
+        capped at whatever's left of the budget when it starts, not at the budget itself, so the
+        loop's several route-set attempts can't multiply the total past `scheduler_timeout_s`
+        (see `Compo_slim`'s docstring). For "aoccbs" it is AOC-CBS's own anytime-search
+        `timelimit`. For "pp_sipp" it is checked between robots in the priority sweep. `None`
+        (default) leaves each backend at its own default (uncapped for "ComSat", 60s for
+        "aoccbs", uncapped for "pp_sipp").
     """
     if show_initial_state:
         from pkg_motion_plan.initial_state_plot import plot_initial_state
