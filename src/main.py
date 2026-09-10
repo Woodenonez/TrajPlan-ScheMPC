@@ -44,6 +44,18 @@ def compute_makespan(solution):
     return max(eta for timetable in solution.values() for _, eta in timetable)
 
 
+def compute_sum_of_costs(solution):
+    """Sum-of-costs: the sum over robots of each robot's arrival time at its goal.
+
+    `solution` is {robot_id: [(node_id, ETA), ...]}, time-ordered, so a robot's goal
+    arrival is the ETA of its last scheduled node. Any waiting a robot does en route is
+    therefore already included -- waiting pushes the goal arrival later, which is the
+    standard MAPF sum-of-costs convention. Backend-agnostic for the same reason
+    `compute_makespan` is: every backend's exported ETA is a real, finite arrival time.
+    """
+    return sum(timetable[-1][1] for timetable in solution.values() if timetable)
+
+
 def general_funct(problem, scheduler=True, controller=True, naive_tracker=False, ignore_speed_ref=False, recording=False,
                   scheduler_backend="ComSat", mpc_backend=None, assign_via_routing=False,
                   first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
@@ -81,6 +93,7 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
 
     total_travel_distance = None
     makespan = None
+    sum_of_costs = None
 
     if scheduler:
         status(f"Scheduler executing ({scheduler_backend}, problem={problem!r})")
@@ -140,6 +153,9 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         makespan = compute_makespan(solution)
         status(f"Makespan ({scheduler_backend}): {makespan:.2f}")
 
+        sum_of_costs = compute_sum_of_costs(solution)
+        status(f"Sum-of-costs ({scheduler_backend}): {sum_of_costs:.2f}")
+
     if controller:
         from run_mpc import run_mpc
         with open(f"{data_path}/test_cases/{problem}.json",'r') as read_file:
@@ -157,6 +173,8 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
             result["total_travel_distance"] = total_travel_distance
         if makespan is not None:
             result["makespan"] = makespan
+        if sum_of_costs is not None:
+            result["sum_of_costs"] = sum_of_costs
         return result
     return None
 

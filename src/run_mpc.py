@@ -170,9 +170,15 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
         verbose: If False (default), only a timestamped "MPC executing"/"MPC done" status
             line is printed. If True, also print the per-tick reference/cost diagnostics,
             robot/work-mode setup lines, and the backend/collision-detection setup lines.
-        late_threshold_s: A robot is declared failed ("late") once it is still short of
+        late_threshold_s: A robot counts as currently "late" while it is still short of
             the node it is currently targeting more than this many seconds past that
-            node's scheduled ETA. Pass None or False to disable the check.
+            node's scheduled ETA. The run only fails ("late") once every robot that has
+            not yet reached its final goal is simultaneously late -- i.e. either every
+            robot is late, or some are late and the rest have already finished. A single
+            late robot does not fail the run on its own as long as at least one other
+            robot is still unfinished and on time; the run also does not fail once every
+            robot has finished, even if some finished late. Pass None or False to disable
+            the check.
         stuck_timeout_s: A robot is declared failed ("stuck") once it has not moved
             (translated) more than `stuck_eps` for this many consecutive seconds while
             not idle, not in the `aligning` work mode (which legitimately rotates in
@@ -322,6 +328,12 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     for kt in range(TIMEOUT):
         robot_states = []
         incomplete = False
+        # Reset each tick: which currently-unfinished robots are "late" this tick, and the
+        # detail behind that. Robots that go idle this tick never get an entry (they `continue`
+        # below before the late check runs), which is what lets the aggregate check treat
+        # "finished" and "not late" identically.
+        late_now = {}
+        late_detail = {}
         for i, rid in enumerate(robot_ids):
             # if rid != 'A1':
             #     continue
@@ -430,10 +442,15 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                 failure = {"type": "stuck", "robot_id": rid, "time": kt*config_mpc.ts,
                            "stuck_for_s": stuck_ticks[rid]*config_mpc.ts}
 
+            # "late" no longer fails the run by itself -- it only records this robot's
+            # status for the tick; the aggregate check after the per-robot loop is what
+            # decides whether the whole run fails.
             eta = planner.current_target_eta
             if late_threshold_s is not None and eta is not None and (kt*config_mpc.ts - eta) > late_threshold_s:
-                failure = {"type": "late", "robot_id": rid, "time": kt*config_mpc.ts,
-                           "scheduled_eta": eta, "lateness_s": kt*config_mpc.ts - eta}
+                late_now[rid] = True
+                late_detail[rid] = {"scheduled_eta": eta, "lateness_s": kt*config_mpc.ts - eta}
+            else:
+                late_now[rid] = False
 
             ### "collision" (part 1 of 2): this robot's body against the static world --
             ### obstacles and the map boundary. `clearance` is the gap between the robot's
@@ -467,6 +484,16 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                         break
                 if failure is not None:
                     break
+
+        ### Aggregate "late" check: a robot going idle never gets a `late_now` entry (it
+        ### `continue`s above before the late check runs), so "finished" and "not late" are
+        ### indistinguishable here on purpose. The run only fails once every robot that is
+        ### still going -- i.e. every key in `late_now` -- is late: that is exactly "all
+        ### robots are stuck" when nothing has finished yet, and "some are stuck and the
+        ### rest have reached their final goal" once some have.
+        if failure is None and late_threshold_s is not None and late_now and all(late_now.values()):
+            failure = {"type": "late", "time": kt*config_mpc.ts,
+                       "robots": {rid: late_detail[rid] for rid in late_now}}
 
         if not headless:
             main_plotter.plot_in_loop(time=kt*config_mpc.ts, autorun=AUTORUN, zoom_in=None)
