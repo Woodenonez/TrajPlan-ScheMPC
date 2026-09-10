@@ -20,7 +20,7 @@ MPC_REASON_LABELS = {"late": "late_threshold"}
 RESULT_FIELDS = [
     "scheduler", "map", "scenario", "n_agents", "seed", "method",
     "scheduler_success", "total_travel_distance", "makespan", "sum_of_costs",
-    "mpc_success", "mpc_failure_reason", "simulation_runtime_s",
+    "n_robots_finished", "mpc_failure_reason", "simulation_runtime_s",
     "n_nodes_compared", "n_nodes_missing",
     "mean_eta_diff_s", "max_abs_eta_diff_s",
     "error",
@@ -135,7 +135,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                             "n_agents": n_agent, "seed": seed, "method": method,
                             "scheduler_success": 0, "total_travel_distance": "", "makespan": "",
                             "sum_of_costs": "",
-                            "mpc_success": "", "mpc_failure_reason": "", "simulation_runtime_s": "",
+                            "n_robots_finished": "", "mpc_failure_reason": "", "simulation_runtime_s": "",
                             "n_nodes_compared": 0, "n_nodes_missing": "",
                             "mean_eta_diff_s": "", "max_abs_eta_diff_s": "", "error": "",
                         }
@@ -200,9 +200,8 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                                 row["simulation_runtime_s"] = result.get("simulation_runtime_s", "")
 
                                 mpc_status = result.get("status")
-                                mpc_success = mpc_status == "success"
-                                row["mpc_success"] = int(mpc_success)
-                                if not mpc_success:
+                                row["n_robots_finished"] = result.get("n_robots_finished", "")
+                                if mpc_status != "success":
                                     row["mpc_failure_reason"] = MPC_REASON_LABELS.get(mpc_status, mpc_status)
 
                                 merged = _merged_schedule_df(instance_name)
