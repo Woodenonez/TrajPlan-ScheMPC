@@ -201,9 +201,13 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
 
     Returns:
         A dict: {"status": "success"|"late"|"stuck"|"collision"|"timeout", "failure": dict
-        or None, "ticks": int, "time": float, "actual_schedule_path": str}. "timeout" means
-        the simulation ran out its full tick budget (`TIMEOUT`) without every robot
-        finishing and without tripping a late/stuck/collision failure.
+        or None, "ticks": int, "time": float, "actual_schedule_path": str,
+        "n_robots_finished": int, "n_robots_total": int}. "timeout" means the simulation
+        ran out its full tick budget (`TIMEOUT`) without every robot finishing and without
+        tripping a late/stuck/collision failure. "n_robots_finished" counts robots that
+        reached their final goal regardless of `status` -- e.g. a "late"/"stuck"/"collision"
+        failure or a "timeout" can still report some robots finished, since those checks
+        stop the whole run rather than rewinding robots that already got there.
     """
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
@@ -541,12 +545,19 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     else:
         run_status = "success"
 
+    # A robot's `idle` flag is set once (by check_termination_condition, above) and never
+    # cleared, so counting it here -- regardless of whether the run ended in "success" or a
+    # failure/timeout -- gives how many robots actually reached their final goal.
+    n_robots_finished = sum(1 for rid in robot_ids if robot_manager.get_controller(rid).idle)
+
     result = {
         "status": run_status,
         "failure": failure,
         "ticks": kt,
         "time": kt*config_mpc.ts,
         "actual_schedule_path": actual_schedule_path,
+        "n_robots_finished": n_robots_finished,
+        "n_robots_total": len(robot_ids),
     }
     status(f"MPC done: status={result['status']}, ticks={kt}, time={kt*config_mpc.ts:.2f}s")
     return result
