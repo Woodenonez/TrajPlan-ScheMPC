@@ -12,7 +12,10 @@ intervenes on one of the two robots, escalating only as far as it has to:
     hold  ->  sidestep  ->  replan
 
 The robot that keeps its slot is the one the *schedule* put first, so the coordinator is
-restoring the scheduler's intended ordering rather than inventing a new one.
+restoring the scheduler's intended ordering rather than inventing a new one. Hold is skipped
+or cut short whenever it cannot possibly work -- the robot it would protect is itself
+currently held by some other conflict, so waiting for it to pass just burns the hold timer
+for nothing; see `_hold_can_help`.
 """
 
 from collections import deque
@@ -422,10 +425,23 @@ class Coordinator:
                     return
                 active.retry_after_t = None
                 self._enter_replan(kt, t, active)
-            elif elapsed >= self.cfg.hold_timeout_s:
+            elif elapsed >= self.cfg.hold_timeout_s or not self._hold_can_help(active):
+                if elapsed < self.cfg.hold_timeout_s:
+                    self._log(t, kt, 'hold_futile', active,
+                              detail=f"{active.priority} became held while {active.yielder} "
+                                     f"waited for it; escalating early instead of riding out "
+                                     f"hold_timeout_s")
                 self._escalate(kt, t, active)
         elif active.tier == 2 and elapsed >= self.cfg.detour_timeout_s:
             self._escalate(kt, t, active)
+
+    def _hold_can_help(self, active: ActiveConflict) -> bool:
+        """Holding the yielder only clears the conflict once `active.priority` itself
+        advances past the contested point. If priority is itself currently held -- for
+        any reason, another coordinator conflict or a scheduled wait -- it isn't going
+        anywhere, so holding the yielder cannot help and would just burn hold_timeout_s
+        before escalating anyway."""
+        return not self.held(active.priority)
 
     def _escalate(self, kt: int, t: float, active: ActiveConflict) -> None:
         """Move to the next enabled tier, or stop trying."""
@@ -433,6 +449,13 @@ class Coordinator:
         if not ladder:
             return   # detection only: watch and record, never intervene
         nxt = next((tier for tier in ladder if tier > active.tier), None)
+        if nxt == 1 and not self._hold_can_help(active):
+            self._log(t, kt, 'hold_skipped', active,
+                      detail=f"{active.priority} is itself currently held (parked or "
+                             f"waiting), so holding {active.yielder} for it would not "
+                             f"clear the way; skipping straight to the next tier")
+            ladder = [tier for tier in ladder if tier != 1]
+            nxt = next((tier for tier in ladder if tier > active.tier), None)
         if nxt is None:
             active.tier = 4
             active.tier_since_t = t
@@ -525,7 +548,7 @@ class Coordinator:
         active.tier = 1
         active.tier_since_t = t
         active.retry_after_t = t + self.cfg.replan_fail_hold_s
-        if self.cfg.enable_hold and self._can_yield(active.yielder):
+        if self.cfg.enable_hold and self._can_yield(active.yielder) and self._hold_can_help(active):
             self._hold(active.yielder, active.key)
 
     # ------------------------------------------------------------- bookkeeping
