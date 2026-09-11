@@ -16,12 +16,28 @@ class CoordinatorConfig:
 
     # --- detection -----------------------------------------------------------------
     lookahead_s: float = 20.0
-    """How far into the projected timetable to look for overlaps. Past this the
+    """How far into the projected timetable to look for a close approach. Past this the
     'delay stays constant' projection is too crude to act on."""
 
-    node_clearance_s: float = 1.0
-    """Two robots' occupancy intervals at a shared node must be at least this far apart.
-    Overlapping, or closer than this, is a conflict."""
+    proximity_clearance_m: Optional[float] = None
+    """Two robots' projected positions must stay at least this far apart at every shared
+    future time within the lookahead window; closer is a conflict. `None` derives the
+    NMPC's own fleet safe distance (`configs.resolve_fleet_distances`), so the coordinator
+    intervenes exactly when the tracker's own predictive avoidance term would already be
+    under strain -- before it, ideally, since the coordinator sees the whole schedule while
+    the NMPC only sees its own horizon."""
+
+    proximity_sample_dt_s: float = 0.5
+    """Time step used to sample each robot's projected position curve when checking for a
+    close approach. Finer catches brief crossings a coarser grid could step over; coarser
+    is cheaper. It has nothing to do with the simulation's own tick rate."""
+
+    head_on_cosine: float = -0.5
+    """Two robots' projected headings at the point of closest approach are classified as a
+    head-on conflict when the cosine between them falls below this (roughly 120 degrees of
+    difference or more), rather than a crossing. The tier ladder skips the sidestep tier for
+    a head-on conflict: stepping aside on a single-lane stretch leaves the yielder just as
+    much in the way, so escalation goes straight from hold to replan."""
 
     open_ticks: int = 3
     """Consecutive ticks a predicted overlap must persist before a conflict is opened.

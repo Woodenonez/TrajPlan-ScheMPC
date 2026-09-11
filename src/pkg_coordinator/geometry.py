@@ -69,7 +69,10 @@ def plan_crossing(coordinator, active, now: float) -> Optional[dict]:
     robot = coordinator.rm.get_robot(rid)
     tt = coordinator.timetable(rid)
 
-    node_index = coordinator._node_index(rid, active.node)
+    # The yielder's own nearest route node at the point of closest approach -- not
+    # necessarily a node the priority robot's route names at all, now that detection is
+    # geometric rather than node-identity matching.
+    node_index = active.snapshot.node_indices.get(rid)
     if node_index is None or node_index + 1 > len(tt) - 1:
         return None
 

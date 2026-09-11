@@ -3,8 +3,11 @@
 The scheduler hands down a timetable whose node separations are, on paper, conflict-free.
 Execution then drifts -- a robot rounds a corner wide, waits out a tracking error, or is
 slowed by the NMPC avoiding someone -- and the separation the scheduler arranged stops
-holding. This layer watches for that, and when two robots are projected to want the same
-node at the same time it intervenes on one of them, escalating only as far as it has to:
+holding. This layer watches for that: it projects every robot's remaining route forward as
+a continuous position-over-time curve and looks for two robots' curves coming within a
+clearance distance of each other at a shared future time -- a *geometric* proximity test,
+not a test on whether the two schedules happen to name the same node. When it finds one it
+intervenes on one of the two robots, escalating only as far as it has to:
 
     hold  ->  sidestep  ->  replan
 
@@ -35,7 +38,6 @@ class ActiveConflict:
 
     key: tuple
     kind: str
-    node: Any
     priority: Any
     yielder: Any
     opened_t: float
@@ -48,10 +50,22 @@ class ActiveConflict:
     tier_since_t: float = 0.0
     breach_ticks: int = 0
     clear_ticks: int = 0
-    max_overlap_s: float = 0.0
+    max_deficit_m: float = 0.0
     replan_attempts: int = 0
     retry_after_t: Optional[float] = None
     opened_logged: bool = False
+
+    @property
+    def node(self) -> Any:
+        """The priority robot's own nearest route node at the point of closest approach."""
+        return self.snapshot.nodes.get(self.priority) if self.snapshot else None
+
+    @property
+    def yielder_node(self) -> Any:
+        """The yielder's own nearest route node at the point of closest approach -- kept
+        apart from `node` because a geometric conflict need not sit on a node shared by
+        both robots' routes."""
+        return self.snapshot.nodes.get(self.yielder) if self.snapshot else None
 
 
 class Coordinator:
@@ -80,6 +94,9 @@ class Coordinator:
 
         self.safe_distance, self.critical_distance = resolve_fleet_distances(config_mpc, config_robot)
         self.v_max = float(config_robot.lin_vel_max)
+        self.proximity_clearance_m = (self.cfg.proximity_clearance_m
+                                      if self.cfg.proximity_clearance_m is not None
+                                      else self.safe_distance)
 
         self._timetables: dict[Any, RobotTimetable] = {}
         self._conflicts: dict[tuple, ActiveConflict] = {}
@@ -112,8 +129,8 @@ class Coordinator:
                                         ('replan', self._replan_enabled)) if on]
                  or ['detect only'])
         status(f"Coordinator on (tiers: {', '.join(tiers)}; "
-               f"clearance={self.cfg.node_clearance_s:.2f}s, lookahead={self.cfg.lookahead_s:.0f}s, "
-               f"safe={self.safe_distance:.3f}m)")
+               f"proximity_clearance={self.proximity_clearance_m:.3f}m, "
+               f"lookahead={self.cfg.lookahead_s:.0f}s, safe={self.safe_distance:.3f}m)")
         if self._replan_disabled_reason:
             print(f"[coordinator] replan tier disabled: {self._replan_disabled_reason}")
 
@@ -280,10 +297,18 @@ class Coordinator:
     def _current_conflicts(self, t: float) -> dict[tuple, Conflict]:
         found: dict[tuple, Conflict] = {}
         for i, rid_a in enumerate(self.robot_ids):
+            pos_a = self._pos_history[rid_a][-1][1]
             for rid_b in self.robot_ids[i+1:]:
-                for conflict in find_conflicts(self._timetables[rid_a], self._timetables[rid_b],
-                                               t, self.cfg.lookahead_s, self.cfg.node_clearance_s):
-                    found[conflict.key] = conflict
+                pos_b = self._pos_history[rid_b][-1][1]
+                for conflict in find_conflicts(
+                        self._timetables[rid_a], pos_a, self._timetables[rid_b], pos_b,
+                        t, self.cfg.lookahead_s, self.proximity_clearance_m,
+                        self.cfg.proximity_sample_dt_s, self.cfg.head_on_cosine):
+                    # Two breach windows for the same pair (of the same kind) collapse to
+                    # one registry entry (see `Conflict.key`); keep whichever is worse.
+                    existing = found.get(conflict.key)
+                    if existing is None or conflict.separation_m < existing.separation_m:
+                        found[conflict.key] = conflict
         return found
 
     def _update_registry(self, t: float) -> None:
@@ -292,11 +317,11 @@ class Coordinator:
         for key, conflict in current.items():
             active = self._conflicts.get(key)
             if active is None:
-                idx = self._node_index(conflict.priority, conflict.node)
+                idx = conflict.node_indices.get(conflict.priority)
                 if idx is None:
                     continue
                 active = ActiveConflict(
-                    key=key, kind=conflict.kind, node=conflict.node,
+                    key=key, kind=conflict.kind,
                     priority=conflict.priority, yielder=conflict.yielder,
                     opened_t=t, priority_node_index=idx, snapshot=conflict,
                     tier_since_t=t)
@@ -304,7 +329,7 @@ class Coordinator:
             active.snapshot = conflict
             active.breach_ticks += 1
             active.clear_ticks = 0
-            active.max_overlap_s = max(active.max_overlap_s, conflict.overlap_s)
+            active.max_deficit_m = max(active.max_deficit_m, conflict.deficit_m)
 
         for key, active in list(self._conflicts.items()):
             # A conflict that has been acted on is only over once the robot that had the slot
@@ -323,13 +348,6 @@ class Coordinator:
             if active.tier == 0 and active.clear_ticks >= self.cfg.release_ticks:
                 self._release(active, t, 'projection clear before any intervention')
 
-    def _node_index(self, robot_id, node_id) -> Optional[int]:
-        tt = self._timetables[robot_id]
-        for i in range(tt.index, len(tt)):
-            if tt.node_ids[i] == node_id:
-                return i
-        return None
-
     def _release(self, active: ActiveConflict, t: float, reason: str) -> None:
         self._conflicts.pop(active.key, None)
         self._unhold(active.yielder, active.key)
@@ -345,9 +363,9 @@ class Coordinator:
 
     def _act(self, kt: int, t: float) -> None:
         handled_pairs = set()
-        # Head-on swaps first: they are the ones a sidestep cannot fix, so if a pair has both
-        # an edge and a node conflict the edge one should drive the decision.
-        ordered = sorted(self._conflicts.values(), key=lambda a: (a.kind != 'edge', a.opened_t))
+        # Head-on conflicts first: they are the ones a sidestep cannot fix, so if a pair has
+        # both a head-on and a crossing conflict open the head-on one should drive the decision.
+        ordered = sorted(self._conflicts.values(), key=lambda a: (a.kind != 'head_on', a.opened_t))
         for active in ordered:
             pair = frozenset((active.priority, active.yielder))
             if pair in handled_pairs:
@@ -360,14 +378,14 @@ class Coordinator:
     def _tier_ladder(self, active: ActiveConflict) -> list[int]:
         """The tiers available for this conflict, in escalation order.
 
-        A head-on swap across one edge skips the sidestep: stepping aside on a single-lane
-        edge leaves the robot just as much in the way, which is why that case goes straight
+        A head-on conflict skips the sidestep: stepping aside on a single-lane stretch
+        leaves the robot just as much in the way, which is why that case goes straight
         from waiting to re-planning.
         """
         ladder = []
         if self.cfg.enable_hold:
             ladder.append(1)
-        if self.cfg.enable_crossing and active.kind != 'edge':
+        if self.cfg.enable_crossing and active.kind != 'head_on':
             ladder.append(2)
         if self._replan_enabled:
             ladder.append(3)
@@ -385,14 +403,15 @@ class Coordinator:
                 return
             active.yielder = yielder
             active.priority = next(r for r in active.snapshot.robots if r != yielder)
-            idx = self._node_index(active.priority, active.node)
+            idx = active.snapshot.node_indices.get(active.priority)
             if idx is not None:
                 active.priority_node_index = idx
             active.opened_logged = True
             self._log(t, kt, 'opened', active,
                       detail=f"{active.priority} is scheduled through {active.node} first; "
-                             f"{active.yielder} would arrive "
-                             f"{abs(active.snapshot.overlap_s):.2f}s inside its window")
+                             f"{active.yielder} would pass within "
+                             f"{active.snapshot.separation_m:.2f}m of it near {active.yielder_node} "
+                             f"(clearance {active.snapshot.clearance_m:.2f}m)")
             self._escalate(kt, t, active)
             return
 
@@ -454,8 +473,8 @@ class Coordinator:
         self._hold(active.yielder, active.key)
         self._interventions[active.yielder] += 1
         self._log(t, kt, 'hold', active,
-                  detail=f"{active.yielder} yields at {active.node}; "
-                         f"{active.priority} keeps its scheduled slot")
+                  detail=f"{active.yielder} yields near {active.yielder_node}; "
+                         f"{active.priority} keeps its scheduled slot at {active.node}")
 
     def _enter_crossing(self, kt: int, t: float, active: ActiveConflict) -> None:
         from .geometry import plan_crossing
@@ -470,7 +489,8 @@ class Coordinator:
         self._unhold(active.yielder, active.key)
         self._interventions[active.yielder] += 1
         self._log(t, kt, 'crossing', active,
-                  detail=f"{active.yielder} sidesteps {result['offset_m']:.2f} m around {active.node}")
+                  detail=f"{active.yielder} sidesteps {result['offset_m']:.2f} m around "
+                         f"{active.yielder_node}")
 
     def _enter_replan(self, kt: int, t: float, active: ActiveConflict) -> None:
         if not self._replan_enabled:
@@ -528,6 +548,7 @@ class Coordinator:
             'tier': TIER_NAMES.get(active.tier, active.tier),
             'pair': f"{active.priority}/{active.yielder}",
             'node': active.node,
+            'yielder_node': active.yielder_node,
             'kind': active.kind,
             'yielder': active.yielder,
             'other': active.priority,
@@ -537,7 +558,8 @@ class Coordinator:
             'proj_arrival_other': _get(snapshot.projected, active.priority),
             'measured_delay_yielder': _round(self._measured_delay(active.yielder)),
             'measured_delay_other': _round(self._measured_delay(active.priority)),
-            'overlap_s': round(snapshot.overlap_s, 3),
+            'approach_separation_m': round(snapshot.separation_m, 3),
+            'clearance_m': round(snapshot.clearance_m, 3),
             'min_separation_m': self._diagnostic_separation(active),
             'detail': detail,
             'duration_s': None if duration_s is None else round(duration_s, 3),
