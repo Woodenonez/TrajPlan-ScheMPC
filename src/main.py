@@ -60,7 +60,8 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
                   scheduler_backend="ComSat", mpc_backend=None, assign_via_routing=False,
                   first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
                   collision_check=True, collision_margin=0.0, verbose=False, show_initial_state=False,
-                  scheduler_timeout_s=None, scheduler_optimality_gap=0.0, agent_radius=None):
+                  scheduler_timeout_s=None, scheduler_optimality_gap=0.0, agent_radius=None,
+                  coordinator=False, coordinator_overrides=None):
     """
     verbose: If False (default), the scheduler and MPC loop only print a handful of
         timestamped status lines (scheduler executing/done/UNSAT, MPC executing/done).
@@ -96,6 +97,13 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         own 0.35 m, which is roughly the robot's bare body radius and so plans passes the NMPC
         then has to widen by deviating from the schedule. Changing it makes the first run pay
         once for a fresh AOC-CBS intersection-intervals cache.
+    coordinator: If True, run the coordination layer between the schedule and the MPC
+        trackers. It compares each robot's measured progress against its scheduled arrival
+        times and, when drift is about to put two robots at the same node at once, holds the
+        robot the schedule put second, sidesteps it, or re-plans it with SIPP -- leaving
+        every other robot's schedule untouched. Off by default and fully inert when off.
+    coordinator_overrides: Optional dict of `pkg_coordinator.CoordinatorConfig` field
+        overrides, e.g. {"enable_crossing": False, "hold_timeout_s": 4.0}.
     """
     if show_initial_state:
         from pkg_motion_plan.initial_state_plot import plot_initial_state
@@ -183,7 +191,9 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         result = run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref,
                 recording=recording, mpc_backend=mpc_backend, headless=headless,
                 late_threshold_s=late_threshold_s, stuck_timeout_s=stuck_timeout_s,
-                collision_check=collision_check, collision_margin=collision_margin, verbose=verbose)
+                collision_check=collision_check, collision_margin=collision_margin, verbose=verbose,
+                coordinator=coordinator, coordinator_overrides=coordinator_overrides,
+                scheduler_backend=scheduler_backend, assign_via_routing=assign_via_routing)
         simulation_runtime_s = time.perf_counter() - sim_start
         status(f"MPC simulation wall-clock runtime: {simulation_runtime_s:.2f}s")
         result["simulation_runtime_s"] = simulation_runtime_s
@@ -255,6 +265,17 @@ if __name__ == "__main__":
         show_initial_state= False, # True = pop up a plot of the map, graph, and each robot's
                               # start/goal markers as soon as this runs, before the scheduler
                               # starts computing. Blocks until the plot window is closed.
+        coordinator= False,   # True = run the coordinator between the schedule and the MPC:
+                              # it watches each robot's measured progress against its
+                              # scheduled arrival times and, when drift is about to put two
+                              # robots on the same node at once, holds the robot the schedule
+                              # put second -- escalating to a lateral sidestep and then to a
+                              # SIPP replan of that one robot if holding does not clear it.
+                              # Writes data/schedule_demo2_data/Coordinator_<problem>.csv.
+        coordinator_overrides= None, # dict of CoordinatorConfig fields to override, e.g.
+                              # {"enable_crossing": False, "enable_replan": False} to run the
+                              # hold tier alone, or {"enable_hold": False, "enable_crossing":
+                              # False, "enable_replan": False} to detect and log only.
     )
     if result is not None and result["status"] != "success":
         raise SystemExit(f"[main] run failed: {result}")
