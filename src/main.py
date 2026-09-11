@@ -265,14 +265,14 @@ if __name__ == "__main__":
         show_initial_state= False, # True = pop up a plot of the map, graph, and each robot's
                               # start/goal markers as soon as this runs, before the scheduler
                               # starts computing. Blocks until the plot window is closed.
-        coordinator= False,   # True = run the coordinator between the schedule and the MPC:
+        coordinator= True,   # True = run the coordinator between the schedule and the MPC:
                               # it watches each robot's measured progress against its
                               # scheduled arrival times and, when drift is about to put two
                               # robots on the same node at once, holds the robot the schedule
                               # put second -- escalating to a lateral sidestep and then to a
                               # SIPP replan of that one robot if holding does not clear it.
                               # Writes data/schedule_demo2_data/Coordinator_<problem>.csv.
-        coordinator_overrides= {"enable_hold": True, "enable_crossing": False, "enable_replan": True},
+        coordinator_overrides= {"enable_hold": True, "enable_crossing": True, "enable_replan": True},
                               # dict of CoordinatorConfig fields to override, e.g.
                               # {"enable_crossing": False, "enable_replan": False} to run the
                               # hold tier alone, or {"enable_hold": False, "enable_crossing":

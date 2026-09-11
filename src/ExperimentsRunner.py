@@ -174,6 +174,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                                 naive_tracker=False,  # True = proportional baseline, False = NMPC (see mpc_backend)
                                 ignore_speed_ref=False,
                                 recording=False,
+                                agent_radius= 0.5,
                                 scheduler_backend=scheduler,  # "ComSat", "occbs", "aoccbs", or "pp_sipp"
                                 scheduler_timeout_s=60,
                                 assign_via_routing=False,
