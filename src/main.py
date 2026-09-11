@@ -216,7 +216,7 @@ if __name__ == "__main__":
     result = general_funct(
         sys.argv[1],
         scheduler = True,
-        controller= False,
+        controller= True,
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
@@ -244,7 +244,7 @@ if __name__ == "__main__":
         headless= False, # True = no matplotlib window, no blocking prompt at the end; run
                               # non-interactively and just return/print a status dict --
                               # see late_threshold_s/stuck_timeout_s below for failure detection
-        late_threshold_s= False, # fail the run once a robot is still short of the node it is
+        late_threshold_s= 30.0, # fail the run once a robot is still short of the node it is
                               # targeting more than this many seconds past that node's
                               # scheduled ETA. None disables the check.
         stuck_timeout_s= False, # fail the run once a robot has not translated more than a couple
@@ -272,7 +272,8 @@ if __name__ == "__main__":
                               # put second -- escalating to a lateral sidestep and then to a
                               # SIPP replan of that one robot if holding does not clear it.
                               # Writes data/schedule_demo2_data/Coordinator_<problem>.csv.
-        coordinator_overrides= None, # dict of CoordinatorConfig fields to override, e.g.
+        coordinator_overrides= {"enable_hold": True, "enable_crossing": False, "enable_replan": True},
+                              # dict of CoordinatorConfig fields to override, e.g.
                               # {"enable_crossing": False, "enable_replan": False} to run the
                               # hold tier alone, or {"enable_hold": False, "enable_crossing":
                               # False, "enable_replan": False} to detect and log only.
