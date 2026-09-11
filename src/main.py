@@ -60,8 +60,7 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
                   scheduler_backend="ComSat", mpc_backend=None, assign_via_routing=False,
                   first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
                   collision_check=True, collision_margin=0.0, verbose=False, show_initial_state=False,
-                  scheduler_timeout_s=None, scheduler_optimality_gap=0.0,
-                  coordinator=False, coordinator_overrides=None):
+                  scheduler_timeout_s=None, scheduler_optimality_gap=0.0, agent_radius=None):
     """
     verbose: If False (default), the scheduler and MPC loop only print a handful of
         timestamped status lines (scheduler executing/done/UNSAT, MPC executing/done).
@@ -87,13 +86,16 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         upper bound is usually within a fraction of a percent within seconds and then barely
         moves, so a small value (0.01) buys back nearly the whole budget for almost no plan
         quality. Ignored by every other backend.
-    coordinator: If True, run the coordination layer between the schedule and the MPC
-        trackers. It compares each robot's measured progress against its scheduled arrival
-        times and, when drift is about to put two robots at the same node at once, holds the
-        robot the schedule put second, sidesteps it, or re-plans it with SIPP -- leaving
-        every other robot's schedule untouched. Off by default and fully inert when off.
-    coordinator_overrides: Optional dict of `pkg_coordinator.CoordinatorConfig` field
-        overrides, e.g. {"enable_crossing": False, "hold_timeout_s": 4.0}.
+    agent_radius: "aoccbs"/"pp_sipp" only -- how much room the schedule leaves between robots.
+        Both backends model a robot as a disc and forbid overlap, so the plan keeps robot centres
+        at least 2*agent_radius apart; this is the only clearance knob, and padding the emitted
+        ETAs instead would not move where two robots pass each other. Pass a radius in metres,
+        the string "mpc" to use the one matching the NMPC's own fleet safe distance
+        (vehicle_width + vehicle_margin = 0.554 m, so 1.107 m between centres -- see
+        pkg_sche.aoccbs.runner.mpc_matched_agent_radius), or None (default) to keep the backends'
+        own 0.35 m, which is roughly the robot's bare body radius and so plans passes the NMPC
+        then has to widen by deviating from the schedule. Changing it makes the first run pay
+        once for a fresh AOC-CBS intersection-intervals cache.
     """
     if show_initial_state:
         from pkg_motion_plan.initial_state_plot import plot_initial_state
@@ -105,6 +107,14 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
 
     if scheduler:
         status(f"Scheduler executing ({scheduler_backend}, problem={problem!r})")
+        # Resolved here rather than at the top of the function so that neither the "mpc" lookup
+        # nor the AOC-CBS import it needs happens on a run that never reaches those backends.
+        if agent_radius == "mpc" and scheduler_backend in ("aoccbs", "pp_sipp"):
+            from pkg_sche.aoccbs.runner import mpc_matched_agent_radius
+            agent_radius = mpc_matched_agent_radius()
+            status(f"agent_radius resolved to {agent_radius:.5f} m "
+                   f"({2*agent_radius:.3f} m planned clearance between robot centres)")
+        radius_kwargs = {} if agent_radius is None else {'agent_radius': agent_radius}
         if scheduler_backend == "ComSat":
             from pkg_sche.sp_comsat.Compo_slim import Compo_slim
             instance, optimum, running_time, len_previous_routes, paths_changed, solution = Compo_slim(
@@ -117,11 +127,11 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
             solution, _ = AOCCBS(problem, assign_via_routing=assign_via_routing,
                                   first_solution_only=first_solution_only, verbose=verbose,
                                   timeout=scheduler_timeout_s,
-                                  optimality_gap=scheduler_optimality_gap)
+                                  optimality_gap=scheduler_optimality_gap, **radius_kwargs)
         elif scheduler_backend == "pp_sipp":
             from pkg_sche.pp_sipp.runner import PP_SIPP
             solution, _ = PP_SIPP(problem, assign_via_routing=assign_via_routing, verbose=verbose,
-                                   timeout=scheduler_timeout_s)
+                                   timeout=scheduler_timeout_s, **radius_kwargs)
         else:
             raise ValueError(f"unknown scheduler_backend {scheduler_backend!r}")
 
@@ -173,9 +183,7 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         result = run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref,
                 recording=recording, mpc_backend=mpc_backend, headless=headless,
                 late_threshold_s=late_threshold_s, stuck_timeout_s=stuck_timeout_s,
-                collision_check=collision_check, collision_margin=collision_margin, verbose=verbose,
-                coordinator=coordinator, coordinator_overrides=coordinator_overrides,
-                scheduler_backend=scheduler_backend, assign_via_routing=assign_via_routing)
+                collision_check=collision_check, collision_margin=collision_margin, verbose=verbose)
         simulation_runtime_s = time.perf_counter() - sim_start
         status(f"MPC simulation wall-clock runtime: {simulation_runtime_s:.2f}s")
         result["simulation_runtime_s"] = simulation_runtime_s
@@ -198,7 +206,7 @@ if __name__ == "__main__":
     result = general_funct(
         sys.argv[1],
         scheduler = True,
-        controller= True,
+        controller= False,
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
@@ -214,6 +222,12 @@ if __name__ == "__main__":
                               # pre-pinned to one ATR (see pkg_sche.aoccbs.runner)
         first_solution_only= False, # aoccbs only: stop at the first feasible joint plan instead
                               # of running the normal anytime search out to optimality/timelimit
+        agent_radius= None,   # aoccbs/pp_sipp only: robot disc radius the scheduler plans with,
+                              # so the plan keeps robot centres 2*agent_radius apart. None =
+                              # the backends' 0.35 m (about the bare body radius); "mpc" = the
+                              # radius matching the NMPC's fleet safe distance (0.554 m, i.e.
+                              # 1.107 m between centres), which is what to use if robots pass
+                              # each other too closely for the tracker to follow the schedule.
         mpc_backend= "panoc", # "casadi" (IPOPT, no build step); "panoc" or "panoc_light" (both
                               # need build_solver.py, with panoc_builder set to match -- see
                               # build_solver.py); None falls back to solver_type in config/mpc_fast.yaml
@@ -238,20 +252,9 @@ if __name__ == "__main__":
                               # console output; False = just the timestamped status lines
                               # (scheduler executing/done/UNSAT, MPC executing/done) -- handy
                               # when running several instances back to back.
-        show_initial_state= True, # True = pop up a plot of the map, graph, and each robot's
+        show_initial_state= False, # True = pop up a plot of the map, graph, and each robot's
                               # start/goal markers as soon as this runs, before the scheduler
                               # starts computing. Blocks until the plot window is closed.
-        coordinator= False,   # True = run the coordinator between the schedule and the MPC:
-                              # it watches each robot's measured progress against its
-                              # scheduled arrival times and, when drift is about to put two
-                              # robots on the same node at once, holds the robot the schedule
-                              # put second -- escalating to a lateral sidestep and then to a
-                              # SIPP replan of that one robot if holding does not clear it.
-                              # Writes data/schedule_demo2_data/Coordinator_<problem>.csv.
-        coordinator_overrides= None, # dict of CoordinatorConfig fields to override, e.g.
-                              # {"enable_crossing": False, "enable_replan": False} to run the
-                              # hold tier alone, or {"enable_hold": False, "enable_crossing":
-                              # False, "enable_replan": False} to detect and log only.
     )
     if result is not None and result["status"] != "success":
         raise SystemExit(f"[main] run failed: {result}")
