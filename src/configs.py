@@ -146,3 +146,20 @@ class MpcConfiguration(_Configuration):
         self.max_outer_iter = config.max_outer_iter     # [C] Penalty homotopy, outer solves per control step
         self.max_solver_iter = config.max_solver_iter   # [C] ipopt.max_iter
 
+
+def resolve_fleet_distances(config_mpc: MpcConfiguration,
+                            config_robot: CircularRobotSpecification) -> tuple[float, float]:
+    """The (safe, critical) robot-to-robot distances in metres.
+
+    `null` in the YAML means "derive from the robot spec", which is what PANOC does with its
+    own built-in constants. Shared by the CasADi tracker and the coordinator so the two can
+    never disagree about what counts as too close.
+    """
+    safe = (2*(config_robot.vehicle_width + config_robot.vehicle_margin)
+            if config_mpc.fleet_safe_distance is None
+            else float(config_mpc.fleet_safe_distance))
+    critical = (2*config_robot.vehicle_width + config_robot.vehicle_margin
+                if config_mpc.fleet_critical_distance is None
+                else float(config_mpc.fleet_critical_distance))
+    return safe, critical
+

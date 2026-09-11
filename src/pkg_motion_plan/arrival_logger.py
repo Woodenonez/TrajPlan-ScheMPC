@@ -133,6 +133,23 @@ class ArrivalLogger:
                     continue
             break
 
+    def arrivals_so_far(self, robot_id: Any) -> list[tuple[Any, float, bool]]:
+        """The `(node_id, time, exact)` arrivals settled for a robot *so far*.
+
+        Readable mid-run, not just after `finalize`: `update` commits each node as the
+        robot leaves it, so this is the measured arrival history up to now. The node the
+        robot is currently at or approaching is absent until it is settled.
+        """
+        route = self._routes.get(robot_id)
+        if route is None:
+            return []
+        return [(node_id, time, exact) for _, node_id, time, exact in route['arrivals']]
+
+    def last_arrival(self, robot_id: Any) -> Optional[tuple[Any, float, bool]]:
+        """The most recently settled arrival for a robot, or None if it has none yet."""
+        arrivals = self.arrivals_so_far(robot_id)
+        return arrivals[-1] if arrivals else None
+
     def finalize(self) -> None:
         """Close out every route once the run is over.
 

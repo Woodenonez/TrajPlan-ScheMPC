@@ -5,7 +5,7 @@ from typing import Callable, Sequence, TypedDict, cast
 
 import casadi as ca  # type: ignore
 
-from configs import CircularRobotSpecification, MpcConfiguration
+from configs import CircularRobotSpecification, MpcConfiguration, resolve_fleet_distances
 
 from . import mpc_cost as mc
 from . import mpc_helper as mh
@@ -76,13 +76,7 @@ class CasadiNMPC:
         self._dynobs_weight = 1000.0
         self._critical_step = int(self._cfg.critical_step)
         self._obstacle_beta = float(self._cfg.obstacle_beta)
-        # `null` in the YAML means "derive from the robot spec", which is what PANOC does.
-        self._safe_distance = (2*(self._spec.vehicle_width + self._spec.vehicle_margin)
-                               if self._cfg.fleet_safe_distance is None
-                               else float(self._cfg.fleet_safe_distance))
-        self._critical_distance = (2*self._spec.vehicle_width + self._spec.vehicle_margin
-                                   if self._cfg.fleet_critical_distance is None
-                                   else float(self._cfg.fleet_critical_distance))
+        self._safe_distance, self._critical_distance = resolve_fleet_distances(self._cfg, self._spec)
 
         self._motion_model: Callable[[ca.SX, ca.SX, float], ca.SX] | None = None
         self._load_parameters()

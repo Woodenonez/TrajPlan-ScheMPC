@@ -160,10 +160,23 @@ def relax_final_eta(path_coords, path_times, lin_vel_max):
 
 def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, recording=False, mpc_backend=None,
             headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0, stuck_eps=0.02,
-            stuck_arrival_tol=0.3, collision_check=True, collision_margin=0.0, verbose=False):
+            stuck_arrival_tol=0.3, collision_check=True, collision_margin=0.0, verbose=False,
+            coordinator=False, coordinator_overrides=None, scheduler_backend=None,
+            assign_via_routing=False):
     """Run the MPC simulation loop.
 
     Args:
+        coordinator: If True, run the coordination layer (`pkg_coordinator`) between the
+            schedule and the trackers: it watches each robot's progress against its
+            scheduled arrival times and, when execution drift is about to put two robots
+            at the same node at once, holds one of them, sidesteps it, or re-plans it.
+            Off by default, and genuinely inert when off -- the package is not even
+            imported, so a run without it does not need `external/AOC-CBS`.
+        coordinator_overrides: Optional dict of `CoordinatorConfig` field overrides.
+        scheduler_backend: Which backend produced the schedule. Only used by the
+            coordinator, to decide whether its replan tier can run at all.
+        assign_via_routing: Passed to the coordinator's replan tier, matching the flag of
+            the same name on the `aoccbs`/`pp_sipp` backends.
         headless: If True, skip the matplotlib live plotter (and its blocking "press
             anything to finish" prompt) entirely, so the whole pipeline can run
             non-interactively -- e.g. from a script or CI -- and simply return a result.
@@ -329,6 +342,19 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
             print(f"[run_mpc] Collision detection on (robot radius {config_robot.vehicle_width:.3f} m, "
                   f"margin {collision_margin:.3f} m)")
 
+    ### The coordination layer. Imported only when asked for, so a run without it does not
+    ### depend on the replan tier's `external/AOC-CBS` install at all.
+    coord = None
+    if coordinator:
+        from pkg_coordinator import Coordinator, CoordinatorConfig
+        coord = Coordinator(
+            robot_manager=robot_manager, robot_ids=robot_ids, gpc=gpc,
+            config_mpc=config_mpc, config_robot=config_robot,
+            arrival_logger=arrival_logger, problem=problem, test_case_path=test_case_path,
+            config=CoordinatorConfig(**(coordinator_overrides or {})),
+            scheduler_backend=scheduler_backend, assign_via_routing=assign_via_routing,
+            naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref, verbose=VERBOSE)
+
     for kt in range(TIMEOUT):
         robot_states = []
         incomplete = False
@@ -356,7 +382,31 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
                 if not headless:
                     main_plotter.update_plot(rid, kt, 0, None, 0, None, None)
                 continue
-            
+
+            ### The coordinator is holding this robot: command nothing at all this tick.
+            ### Publishing the frozen pose as this robot's prediction matters -- that is what
+            ### the *other* robots' fleet-avoidance cost reads, so they see a parked obstacle
+            ### rather than a stale moving one.
+            ###
+            ### This `continue` sits deliberately ABOVE the stuck and late checks below: a
+            ### robot the coordinator is holding on purpose must not be reported as stuck,
+            ### and must not count towards the aggregate late failure -- the coordinator, not
+            ### the tracker, is responsible for it while it is held. Moving this branch below
+            ### those checks would silently fail runs that the coordinator is handling
+            ### correctly.
+            if coord is not None and coord.held(rid):
+                controller.set_current_state(robot.state)
+                frozen = np.tile(np.asarray(robot.state, dtype=float), (config_mpc.N_hor, 1))
+                robot_manager.set_pred_states(rid, frozen)
+                if not headless:
+                    main_plotter.update_plot(rid, kt, np.zeros(2), None, 0.0, frozen, frozen)
+                    visualizer.update(*robot.state)
+                last_pos[rid] = np.asarray(robot.state[:2], dtype=float)
+                stuck_ticks[rid] = 0
+                incomplete = True   # nothing else marks the run unfinished for a held robot
+                continue
+
+
             # `idx_check_range` is how many base-trajectory samples ahead of the current
             # docking point the planner may look for the sample nearest the robot, and the
             # docking index never regresses -- so it is also the furthest the reference can
@@ -431,6 +481,9 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
             ### waiting out a recharge or a time-window/precedence gap) is not stuck.
             ### "late" fires if a robot is still short of its current target node more
             ### than late_threshold_s past that node's scheduled ETA.
+            ### Note a robot the coordinator is holding never reaches either check -- it
+            ### `continue`s out of the loop further up, on purpose. Do not move that branch
+            ### below this point.
             pos = np.asarray(robot.state[:2], dtype=float)
             target_node = planner.current_target_node
             dist_to_target = float(np.hypot(pos[0]-target_node[0], pos[1]-target_node[1]))
@@ -468,6 +521,13 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
 
             if failure is not None:
                 break
+
+        ### Coordination runs here, after every robot has moved and been logged for this
+        ### tick, so it sees one consistent snapshot of the fleet's progress -- and before
+        ### the collision check below, which is the backstop for anything it fails to
+        ### resolve.
+        if coord is not None and failure is None:
+            coord.step(kt, kt*config_mpc.ts)
 
         ### "collision" (part 2 of 2): robot against robot. This runs outside the per-robot
         ### loop because it needs every robot's post-step position, including robots that
@@ -523,6 +583,15 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     if unreached:
         print(f"[run_mpc] Nodes never reached: {unreached}")
 
+    coordinator_summary = None
+    if coord is not None:
+        coordinator_path = os.path.join(data_dir, f"Coordinator_{problem}.csv")
+        written = coord.finalize(coordinator_path)
+        coordinator_summary = coord.summary()
+        coordinator_summary["csv_path"] = written
+        if written and VERBOSE:
+            print(f"Coordinator log saved to: {written}")
+
     # Non-convergence is per-solve and easy to miss tick by tick; the totals are not. A run
     # can finish "successfully" while a robot was steered by hundreds of non-optimal iterates.
     bad_exits = {rid: robot_manager.get_controller(rid).bad_exit_count for rid in robot_ids}
@@ -559,5 +628,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
         "n_robots_finished": n_robots_finished,
         "n_robots_total": len(robot_ids),
     }
+    if coordinator_summary is not None:
+        result["coordinator"] = coordinator_summary
     status(f"MPC done: status={result['status']}, ticks={kt}, time={kt*config_mpc.ts:.2f}s")
     return result
