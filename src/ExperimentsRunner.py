@@ -1,5 +1,6 @@
 import os
 import csv
+import json
 import pathlib
 
 import pandas as pd  # type: ignore
@@ -19,6 +20,7 @@ MPC_REASON_LABELS = {"late": "late_threshold"}
 
 RESULT_FIELDS = [
     "scheduler", "map", "scenario", "n_agents", "seed", "method",
+    "agent_radius", "coordinator", "coordinator_overrides",
     "scheduler_success", "total_travel_distance", "makespan", "sum_of_costs",
     "n_robots_finished", "mpc_failure_reason", "simulation_runtime_s",
     "n_nodes_compared", "n_nodes_missing",
@@ -93,9 +95,9 @@ def _write_result_row(row):
 
 
 def _write_instance_csv(instance_name, summary_row, merged):
-    """Per-instance CSV. One header line naming all 23 columns, then the summary line --
-    the same fields written to experiments_results.csv, filling columns 1-18 only -- then
-    one line per scheduled node in columns 19-23: the full planned-vs-actual breakdown,
+    """Per-instance CSV. One header line naming all 26 columns, then the summary line --
+    the same fields written to experiments_results.csv, filling columns 1-21 only -- then
+    one line per scheduled node in columns 22-26: the full planned-vs-actual breakdown,
     i.e. schedule.csv and Actual_<instance_name>.csv joined on (robot_id, node_id).
     The summary is written once rather than repeated on every node line."""
     node_fields = ["robot_id", "node_id", "ETA_planned", "ETA_actual", "ETA_diff"]
@@ -119,9 +121,13 @@ def _write_instance_csv(instance_name, summary_row, merged):
     return out_path
 
 
-def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
+def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
+              agent_radius=None, coordinator=False, coordinator_overrides=None):
 
     os.makedirs(results_dir, exist_ok=True)
+    # CSV-ready renderings of the two settings that aren't already plain scalars, computed
+    # once since they're the same for every instance in this call.
+    coordinator_overrides_str = json.dumps(coordinator_overrides) if coordinator_overrides else ""
 
     for scheduler in schedulers:
         for map in maps:
@@ -133,6 +139,9 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                         row = {
                             "scheduler": scheduler, "map": map, "scenario": scenario,
                             "n_agents": n_agent, "seed": seed, "method": method,
+                            "agent_radius": agent_radius if agent_radius is not None else "",
+                            "coordinator": int(coordinator),
+                            "coordinator_overrides": coordinator_overrides_str,
                             "scheduler_success": 0, "total_travel_distance": "", "makespan": "",
                             "sum_of_costs": "",
                             "n_robots_finished": "", "mpc_failure_reason": "", "simulation_runtime_s": "",
@@ -184,6 +193,9 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid"):
                                 stuck_timeout_s=False,
                                 collision_check=True,
                                 collision_margin=0.0,
+                                agent_radius=agent_radius,
+                                coordinator=coordinator,
+                                coordinator_overrides=coordinator_overrides,
                             )
 
                             # general_funct returns {"status": "no_schedule", ...} without ever
@@ -242,4 +254,10 @@ if __name__ == "__main__":
 
     method = "grid"  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
-    ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method=method)
+    agent_radius = None  # None, a metres float, or "mpc" -- see general_funct's docstring
+    coordinator = False  # run the coordination layer between the schedule and the trackers
+    coordinator_overrides = None  # e.g. {"enable_crossing": False, "enable_replan": False}
+
+    ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method=method,
+              agent_radius=agent_radius, coordinator=coordinator,
+              coordinator_overrides=coordinator_overrides)
