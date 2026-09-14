@@ -160,6 +160,43 @@ def _write_instance_csv(instance_name, merged):
     return out_path
 
 
+def _failed_instances(prev_ctm, schedulers, maps, scenarios, n_agents, seeds, method):
+    """(scheduler, map, scenario, n_agent, seed) combos -- drawn from the given lists -- whose
+    row in experiments_results.csv at conflict_time_margin == prev_ctm (same method) either
+    finished fewer robots than n_agents or has no usable n_robots_finished at all (blank, e.g.
+    an exception or a "no_schedule" run). Used to re-run, at a new conflict_time_margin, only
+    the instances a previous ctm sweep failed on. Returns [] if experiments_results.csv doesn't
+    exist yet, or no prior row matches."""
+    if not os.path.exists(results_csv_path):
+        return []
+
+    df = pd.read_csv(results_csv_path, dtype=str, keep_default_na=False)
+    prev_ctm_str = "" if prev_ctm is None else str(prev_ctm)
+    scenario_strs = {str(s) for s in scenarios}
+    n_agent_strs = {str(n) for n in n_agents}
+    seed_strs = {str(s) for s in seeds}
+
+    mask = (
+        (df["method"] == method)
+        & (df["conflict_time_margin"] == prev_ctm_str)
+        & (df["scheduler"].isin(schedulers))
+        & (df["map"].isin(maps))
+        & (df["scenario"].isin(scenario_strs))
+        & (df["n_agents"].isin(n_agent_strs))
+        & (df["seed"].isin(seed_strs))
+    )
+    candidates = df[mask]
+
+    finished = pd.to_numeric(candidates["n_robots_finished"], errors="coerce")
+    n_agents_num = pd.to_numeric(candidates["n_agents"], errors="coerce")
+    failed = candidates[finished.isna() | (finished < n_agents_num)]
+
+    return [
+        (row["scheduler"], row["map"], row["scenario"], int(row["n_agents"]), int(row["seed"]))
+        for _, row in failed.iterrows()
+    ]
+
+
 def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
               agent_radius=None, conflict_time_margin=None):
 
@@ -272,7 +309,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
 
 if __name__ == "__main__":
 
-    schedulers = ['aoccbs','pp_sipp'] # ComSat, occbs, aoccbs, or pp_sipp
+    schedulers = ['aoccbs'] # ComSat, occbs, aoccbs, or pp_sipp
 
     maps = [
             # 'den312d',
@@ -283,20 +320,30 @@ if __name__ == "__main__":
     scenarios = ['1']
 
     n_agents = [
-        # 4,5,6,7,8,9,10,
+        24,
+        # 5,6,7,8,9,10,
         # 11,12,13,14,15,16,17,18,19,20,
-        21,22,23,24,25,26,27,28,29,30,
-        31,32,33,34,35,36,37,38,39,40,
+        # 21,22,23,24,25,26,27,28,29,30,
+        # 31,32,33,34,35,36,37,38,39,40,
     ]
 
     seeds = [
         7
     ]
 
-    method = "grid"  # "grid" or "sampled" -- how convert_movingai builds the instance graph
+    methods = ["grid"]  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
-    agent_radius = None  # None, a metres float, or "mpc" -- see general_funct's docstring
-    conflict_time_margin = None  # seconds, aoccbs/pp_sipp only -- see general_funct's docstring
+    ctms = [0]
 
-    ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method=method,
-              agent_radius=agent_radius, conflict_time_margin=conflict_time_margin)
+    for method in methods:
+        prev_ctm = None
+        for ctm in ctms:
+            if prev_ctm is None:
+                # first ctm in the sweep: nothing to compare against yet, run everything.
+                ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method=method, conflict_time_margin=ctm)
+            else:
+                retry = _failed_instances(prev_ctm, schedulers, maps, scenarios, n_agents, seeds, method)
+                for scheduler, map_name, scenario, n_agent, seed in retry:
+                    ExpRunner([scheduler], [map_name], [scenario], [n_agent], [seed],
+                              method=method, conflict_time_margin=ctm)
+            prev_ctm = ctm
