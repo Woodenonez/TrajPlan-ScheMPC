@@ -21,8 +21,8 @@ MPC_REASON_LABELS = {"late": "late_threshold"}
 RESULT_FIELDS = [
     "scheduler", "map", "scenario", "n_agents", "seed", "method",
     "agent_radius", "conflict_time_margin",
-    "scheduler_success", "total_travel_distance", "makespan", "sum_of_costs",
-    "n_robots_finished", "mpc_failure_reason", "simulation_runtime_s",
+    "scheduler_success", "sum_of_costs", "actual_sum_of_cost",
+    "n_robots_finished", "mpc_failure_reason",
     "n_nodes_compared", "n_nodes_missing",
     "mean_eta_diff_s", "max_abs_eta_diff_s",
     "error",
@@ -62,6 +62,23 @@ def _schedule_diff_stats(merged):
         "mean_eta_diff_s": round(float(compared.mean()), 3) if not compared.empty else "",
         "max_abs_eta_diff_s": round(float(compared.abs().max()), 3) if not compared.empty else "",
     }
+
+
+def _actual_sum_of_cost(merged):
+    """The measured counterpart to main.py's compute_sum_of_costs: sum over robots of each
+    robot's ACTUAL arrival time at its last scheduled node, rather than the planned ETA.
+    `merged` preserves schedule.csv's per-robot chronological row order (see
+    `_merged_schedule_df`), so a robot's last row is its route's goal node.
+
+    Left blank ("") -- rather than a partial sum over only the robots that finished -- unless
+    every robot in the run actually reached its own last scheduled node; a robot that never
+    arrives (collision/timeout/late-threshold abort) has no real goal-arrival time to sum."""
+    if merged is None or merged.empty:
+        return ""
+    last_per_robot = merged.groupby("robot_id", sort=False).tail(1)
+    if last_per_robot["ETA_actual"].isna().any():
+        return ""
+    return float(last_per_robot["ETA_actual"].sum())
 
 
 def _migrate_results_header():
@@ -108,11 +125,12 @@ def _copy_sched_adherence_csv(src_path, out_name):
 
 
 def _write_instance_csv(instance_name, summary_row, merged):
-    """Per-instance CSV. One header line naming all 26 columns, then the summary line --
-    the same fields written to experiments_results.csv, filling columns 1-21 only -- then
-    one line per scheduled node in columns 22-26: the full planned-vs-actual breakdown,
-    i.e. schedule.csv and Actual_<instance_name>.csv joined on (robot_id, node_id).
-    The summary is written once rather than repeated on every node line."""
+    """Per-instance CSV. One header line naming RESULT_FIELDS plus the five node_fields, then
+    the summary line -- the same fields written to experiments_results.csv, filling the
+    RESULT_FIELDS columns only -- then one line per scheduled node in the node_fields columns:
+    the full planned-vs-actual breakdown, i.e. schedule.csv and Actual_<instance_name>.csv
+    joined on (robot_id, node_id). The summary is written once rather than repeated on every
+    node line."""
     node_fields = ["robot_id", "node_id", "ETA_planned", "ETA_actual", "ETA_diff"]
     fieldnames = RESULT_FIELDS + node_fields
     blank_summary = {f: "" for f in RESULT_FIELDS}
@@ -151,9 +169,8 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                             "n_agents": n_agent, "seed": seed, "method": method,
                             "agent_radius": agent_radius if agent_radius is not None else "",
                             "conflict_time_margin": conflict_time_margin if conflict_time_margin is not None else "",
-                            "scheduler_success": 0, "total_travel_distance": "", "makespan": "",
-                            "sum_of_costs": "",
-                            "n_robots_finished": "", "mpc_failure_reason": "", "simulation_runtime_s": "",
+                            "scheduler_success": 0, "sum_of_costs": "", "actual_sum_of_cost": "",
+                            "n_robots_finished": "", "mpc_failure_reason": "",
                             "n_nodes_compared": 0, "n_nodes_missing": "",
                             "mean_eta_diff_s": "", "max_abs_eta_diff_s": "", "error": "",
                         }
@@ -216,10 +233,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
 
                             merged = None
                             if scheduler_success:
-                                row["total_travel_distance"] = result.get("total_travel_distance", "")
-                                row["makespan"] = result.get("makespan", "")
                                 row["sum_of_costs"] = result.get("sum_of_costs", "")
-                                row["simulation_runtime_s"] = result.get("simulation_runtime_s", "")
 
                                 mpc_status = result.get("status")
                                 row["n_robots_finished"] = result.get("n_robots_finished", "")
@@ -228,6 +242,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
 
                                 merged = _merged_schedule_df(instance_name)
                                 row.update(_schedule_diff_stats(merged))
+                                row["actual_sum_of_cost"] = _actual_sum_of_cost(merged)
                                 sched_adherence_src = result.get("sched_adherence_path")
 
                         except Exception as exc:
