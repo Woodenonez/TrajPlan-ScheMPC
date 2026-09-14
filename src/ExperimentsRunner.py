@@ -247,7 +247,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
 
 if __name__ == "__main__":
 
-    schedulers = ['aoccbs','pp_sipp'] # ComSat, occbs, aoccbs, or pp_sipp
+    schedulers = ['aoccbs'] # ComSat, occbs, aoccbs, or pp_sipp
 
     maps = [
             # 'den312d',
@@ -258,10 +258,11 @@ if __name__ == "__main__":
     scenarios = ['1']
 
     n_agents = [
-        # 4,5,6,7,8,9,10,
+        4,
+        # 5,6,7,8,9,10,
         # 11,12,13,14,15,16,17,18,19,20,
-        21,22,23,24,25,26,27,28,29,30,
-        31,32,33,34,35,36,37,38,39,40,
+        # 21,22,23,24,25,26,27,28,29,30,
+        # 31,32,33,34,35,36,37,38,39,40,
     ]
 
     seeds = [
@@ -274,4 +275,4 @@ if __name__ == "__main__":
     conflict_time_margin = None  # seconds, aoccbs/pp_sipp only -- see general_funct's docstring
 
     ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method=method,
-              agent_radius=agent_radius, conflict_time_margin=conflict_time_margin)
+              agent_radius=agent_radius, conflict_time_margin=10)

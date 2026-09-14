@@ -178,12 +178,12 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         with open(f"{data_path}/schedule_demo2_data/robot_start.json", 'w') as write_file:
             json.dump(robot_starts, write_file, indent=4)
 
-        if scheduler_backend in DISTANCE_SCHEDULER_BACKENDS:
-            total_travel_distance = compute_total_travel_distance(solution, node_coords)
-            status(f"Total travel distance ({scheduler_backend}): {total_travel_distance:.2f}")
-
-        makespan = compute_makespan(solution)
-        status(f"Makespan ({scheduler_backend}): {makespan:.2f}")
+        # if scheduler_backend in DISTANCE_SCHEDULER_BACKENDS:
+        #     total_travel_distance = compute_total_travel_distance(solution, node_coords)
+        #     status(f"Total travel distance ({scheduler_backend}): {total_travel_distance:.2f}")
+        #
+        # makespan = compute_makespan(solution)
+        # status(f"Makespan ({scheduler_backend}): {makespan:.2f}")
 
         sum_of_costs = compute_sum_of_costs(solution)
         status(f"Sum-of-costs ({scheduler_backend}): {sum_of_costs:.2f}")
@@ -237,7 +237,7 @@ if __name__ == "__main__":
                               # radius matching the NMPC's fleet safe distance (0.554 m, i.e.
                               # 1.107 m between centres), which is what to use if robots pass
                               # each other too closely for the tracker to follow the schedule.
-        conflict_time_margin= None, # aoccbs/pp_sipp only: minimum seconds required between two
+        conflict_time_margin= 10, # aoccbs/pp_sipp only: minimum seconds required between two
                               # robots visiting the same node/edge, on top of agent_radius's
                               # spatial clearance. None = 0.0 s (original behaviour).
         mpc_backend= "panoc", # "casadi" (IPOPT, no build step); "panoc" or "panoc_light" (both
