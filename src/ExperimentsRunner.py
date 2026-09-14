@@ -124,27 +124,20 @@ def _copy_sched_adherence_csv(src_path, out_name):
     return out_path
 
 
-def _write_instance_csv(instance_name, summary_row, merged):
-    """Per-instance CSV. One header line naming RESULT_FIELDS plus the five node_fields, then
-    the summary line -- the same fields written to experiments_results.csv, filling the
-    RESULT_FIELDS columns only -- then one line per scheduled node in the node_fields columns:
-    the full planned-vs-actual breakdown, i.e. schedule.csv and Actual_<instance_name>.csv
-    joined on (robot_id, node_id). The summary is written once rather than repeated on every
-    node line."""
+def _write_instance_csv(instance_name, merged):
+    """Per-instance node log: just the planned-vs-actual ETA breakdown, one line per scheduled
+    node -- i.e. schedule.csv and Actual_<instance_name>.csv joined on (robot_id, node_id).
+    The run's summary fields (RESULT_FIELDS) live in experiments_results.csv only; this file
+    carries no per-run identification of its own."""
     node_fields = ["robot_id", "node_id", "ETA_planned", "ETA_actual", "ETA_diff"]
-    fieldnames = RESULT_FIELDS + node_fields
-    blank_summary = {f: "" for f in RESULT_FIELDS}
-    blank_nodes = {f: "" for f in node_fields}
     out_path = os.path.join(results_dir, f"{instance_name}.csv")
 
     with open(out_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=node_fields)
         writer.writeheader()
-        writer.writerow({**summary_row, **blank_nodes})
         if merged is not None and not merged.empty:
             for _, node_row in merged.iterrows():
                 writer.writerow({
-                    **blank_summary,
                     "robot_id": node_row["robot_id"], "node_id": node_row["node_id"],
                     "ETA_planned": node_row["ETA_planned"], "ETA_actual": node_row["ETA_actual"],
                     "ETA_diff": node_row["ETA_diff"],
@@ -254,7 +247,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                         # 0.0 s default (see general_funct), so name the file after what actually ran.
                         ctm_str = "0.0" if conflict_time_margin is None else str(conflict_time_margin)
                         node_log_name = f'{instance_name}_{scheduler}_{method}_ctm{ctm_str}_nodeLog'
-                        _write_instance_csv(node_log_name, row, merged)
+                        _write_instance_csv(node_log_name, merged)
                         sched_adher_name = f'{instance_name}_{scheduler}_{method}_ctm{ctm_str}_SchedAdher'
                         _copy_sched_adherence_csv(sched_adherence_src, sched_adher_name)
 
