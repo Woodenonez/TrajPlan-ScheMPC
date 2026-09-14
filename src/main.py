@@ -60,7 +60,8 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
                   scheduler_backend="ComSat", mpc_backend=None, assign_via_routing=False,
                   first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
                   collision_check=True, collision_margin=0.0, verbose=False, show_initial_state=False,
-                  scheduler_timeout_s=None, scheduler_optimality_gap=0.0, agent_radius=None):
+                  scheduler_timeout_s=None, scheduler_optimality_gap=0.0, agent_radius=None,
+                  conflict_time_margin=None):
     """
     verbose: If False (default), the scheduler and MPC loop only print a handful of
         timestamped status lines (scheduler executing/done/UNSAT, MPC executing/done).
@@ -96,6 +97,13 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         own 0.35 m, which is roughly the robot's bare body radius and so plans passes the NMPC
         then has to widen by deviating from the schedule. Changing it makes the first run pay
         once for a fresh AOC-CBS intersection-intervals cache.
+    conflict_time_margin: "aoccbs"/"pp_sipp" only -- a minimum number of seconds the plan must
+        leave between two robots visiting the same node/edge, on top of whatever agent_radius
+        already keeps apart geometrically. Unlike agent_radius this does not change either
+        robot's modelled footprint, only how much of a time gap the scheduler insists on
+        wherever two robots' plans would otherwise come close. None (default) leaves the
+        backends' own 0.0 s (original behaviour). See SolverConfig.conflict_time_margin and
+        src/pkg_sche/aoccbs/aoccbs_conflict_time_margin.patch.
     """
     if show_initial_state:
         from pkg_motion_plan.initial_state_plot import plot_initial_state
@@ -115,6 +123,10 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
             status(f"agent_radius resolved to {agent_radius:.5f} m "
                    f"({2*agent_radius:.3f} m planned clearance between robot centres)")
         radius_kwargs = {} if agent_radius is None else {'agent_radius': agent_radius}
+        solver_overrides_kwargs = (
+            {} if conflict_time_margin is None
+            else {'solver_overrides': {'conflict_time_margin': conflict_time_margin}}
+        )
         if scheduler_backend == "ComSat":
             from pkg_sche.sp_comsat.Compo_slim import Compo_slim
             instance, optimum, running_time, len_previous_routes, paths_changed, solution = Compo_slim(
@@ -127,11 +139,13 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
             solution, _ = AOCCBS(problem, assign_via_routing=assign_via_routing,
                                   first_solution_only=first_solution_only, verbose=verbose,
                                   timeout=scheduler_timeout_s,
-                                  optimality_gap=scheduler_optimality_gap, **radius_kwargs)
+                                  optimality_gap=scheduler_optimality_gap, **radius_kwargs,
+                                  **solver_overrides_kwargs)
         elif scheduler_backend == "pp_sipp":
             from pkg_sche.pp_sipp.runner import PP_SIPP
             solution, _ = PP_SIPP(problem, assign_via_routing=assign_via_routing, verbose=verbose,
-                                   timeout=scheduler_timeout_s, **radius_kwargs)
+                                   timeout=scheduler_timeout_s, **radius_kwargs,
+                                   **solver_overrides_kwargs)
         else:
             raise ValueError(f"unknown scheduler_backend {scheduler_backend!r}")
 
@@ -197,12 +211,7 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
     return None
 
 if __name__ == "__main__":
-    # problem = '4Small' # SAFETY COEFF 20
-    # problem = '4SmallNu' # 4Small's graph, one destination per robot (single-goal MAPF)
-    # problem = "10Large"
-    # problem = 'ccbs_sparse_1_4'
-    # problem = 'movingai_empty16_1_8'
-    # problem = 'test_4' # why do agents go to a THIRD location?
+    
     result = general_funct(
         sys.argv[1],
         scheduler = True,
@@ -228,6 +237,9 @@ if __name__ == "__main__":
                               # radius matching the NMPC's fleet safe distance (0.554 m, i.e.
                               # 1.107 m between centres), which is what to use if robots pass
                               # each other too closely for the tracker to follow the schedule.
+        conflict_time_margin= None, # aoccbs/pp_sipp only: minimum seconds required between two
+                              # robots visiting the same node/edge, on top of agent_radius's
+                              # spatial clearance. None = 0.0 s (original behaviour).
         mpc_backend= "panoc", # "casadi" (IPOPT, no build step); "panoc" or "panoc_light" (both
                               # need build_solver.py, with panoc_builder set to match -- see
                               # build_solver.py); None falls back to solver_type in config/mpc_fast.yaml

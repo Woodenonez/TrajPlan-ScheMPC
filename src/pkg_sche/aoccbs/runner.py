@@ -344,6 +344,18 @@ def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
     `mpc_matched_agent_radius`, which returns the value matching the tracker's own fleet safe
     distance.
 
+    A *temporal* margin -- a minimum number of seconds between two robots visiting the same node
+    (or edge), independent of `agent_radius` -- is a separate knob:
+    `solver_overrides={'conflict_time_margin': seconds}`. Unlike widening `agent_radius`, this
+    does not change robots' physical footprint or which lateral offsets are geometrically
+    feasible; it just requires more of a time gap wherever two robots' plans would otherwise come
+    close, in either space or time. Implemented by
+    `pkg_sche.aoccbs.aoccbs_conflict_time_margin.patch` (widens every unsafe interval
+    `ConflictManager._compute_uis` derives from a planned action by this amount on both ends,
+    before SIPP treats it as blocked) -- must be reapplied after any re-clone of `external/AOC-CBS`,
+    same as the other aoccbs patch. Defaults to 0.0 (original behaviour). Also honoured by
+    `pkg_sche.pp_sipp.runner.PP_SIPP`, which shares this solver's `ConflictManager`/`SIPP`.
+
     The search runs `DEFAULT_SEARCH_PORTFOLIO`, which is AOC-CBS's own portfolio with its TPR
     repair heuristic switched on; without it the library finds no solution at all on instances
     with many agents. Pass `solver_overrides['search_portfolio']` to override.

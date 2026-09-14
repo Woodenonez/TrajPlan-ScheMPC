@@ -1,0 +1,144 @@
+diff --git a/src/aoccbs/config/schema.py b/src/aoccbs/config/schema.py
+index 2d26d34..c1b4cb5 100644
+--- a/src/aoccbs/config/schema.py
++++ b/src/aoccbs/config/schema.py
+@@ -62,6 +62,13 @@ class SolverConfig:
+     precision: float = 1e-12
+     conflict_margin_factor: float = 100.0
+ 
++    # TrajPlan-ScheMPC: a physical safety buffer in seconds, independent of agent_radius. Every
++    # unsafe interval a planned action creates for other agents (ConflictManager._compute_uis) is
++    # widened by this amount on both ends before SIPP treats it as blocked, so two agents visiting
++    # the same vertex/edge are forced to leave at least this much time between them -- a temporal
++    # margin rather than a spatial one. 0.0 preserves the original behaviour.
++    conflict_time_margin: float = 0.0
++
+     # Console output level:
+     #   'silent'  -> nothing prints.
+     #   'summary' -> only the start message, plant init/reused, and the final outcome; no per-iteration
+diff --git a/src/aoccbs/solver/conflict_manager.py b/src/aoccbs/solver/conflict_manager.py
+index ba589df..d02b2dd 100644
+--- a/src/aoccbs/solver/conflict_manager.py
++++ b/src/aoccbs/solver/conflict_manager.py
+@@ -208,6 +208,11 @@ class ConflictManager:
+         source_agent = self.agents[action.agent_id]
+         source_type = source_agent.type
+ 
++        # TrajPlan-ScheMPC: a fixed temporal buffer applied to every unsafe interval this action
++        # causes, on top of whatever agent_radius already makes unsafe geometrically. See
++        # SolverConfig.conflict_time_margin.
++        margin = self.config.solver_config.conflict_time_margin
++
+         results: list[UnsafeInterval] = []
+ 
+         for target_type in self.agents_of_type.keys():
+@@ -231,8 +236,8 @@ class ConflictManager:
+                 for target_vertex in target_vertices:
+                     results.append(
+                         UnsafeInterval(
+-                            t_start=action.t_start,
+-                            t_end=action.t_end,
++                            t_start=action.t_start - margin,
++                            t_end=action.t_end + margin,
+                             source_action=action,
+                             agent_type=target_type,
+                             element=target_vertex,
+@@ -259,8 +264,8 @@ class ConflictManager:
+                     for interval in absolute_intervals:
+                         results.append(
+                             UnsafeInterval(
+-                                t_start=interval.start,
+-                                t_end=interval.end,
++                                t_start=interval.start - margin,
++                                t_end=interval.end + margin,
+                                 source_action=action,
+                                 agent_type=target_type,
+                                 element=target_edge,
+@@ -289,8 +294,8 @@ class ConflictManager:
+                     for interval in absolute_intervals:
+                         results.append(
+                             UnsafeInterval(
+-                                t_start=interval.start,
+-                                t_end=interval.end,
++                                t_start=interval.start - margin,
++                                t_end=interval.end + margin,
+                                 source_action=action,
+                                 agent_type=target_type,
+                                 element=target_vertex,
+@@ -312,8 +317,8 @@ class ConflictManager:
+                     for interval in absolute_itervals:
+                         results.append(
+                             UnsafeInterval(
+-                                t_start=interval.start,
+-                                t_end=interval.end,
++                                t_start=interval.start - margin,
++                                t_end=interval.end + margin,
+                                 source_action=action,
+                                 agent_type=target_type,
+                                 element=target_edge,
+@@ -695,11 +700,21 @@ class ConflictManager:
+             else: # wait-wait
+                 wait_action_1 = conflict.action1
+                 wait_action_2 = conflict.action2
+-                overlap_start = max(wait_action_1.t_start, wait_action_2.t_start)
+-                overlap_end = min(wait_action_1.t_end, wait_action_2.t_end)
+-                if overlap_start >= overlap_end:
+-                    raise ValueError(f"Invalid collision with no actual overlap between wait actions {wait_action_1} and {wait_action_2}.")
+-                total += overlap_end - overlap_start
++                # TrajPlan-ScheMPC: with conflict_time_margin > 0, a wait-wait conflict can be
++                # registered between two wait actions that do not actually overlap in raw time --
++                # only their margin-padded unsafe intervals do (see _compute_uis). The plain
++                # min(end)-max(start) overlap test below is negative in that case (it measures the
++                # gap, not an overlap), so violation is generalised to margin minus the actual
++                # separation: this reduces to the original raw-overlap length when margin is 0 (the
++                # separation is then negative-of-the-overlap), and to "how much of the required
++                # margin the current gap still falls short of" when margin > 0.
++                separation = max(wait_action_1.t_start - wait_action_2.t_end,
++                                  wait_action_2.t_start - wait_action_1.t_end)
++                violation = self.config.solver_config.conflict_time_margin - separation
++                if violation <= 0:
++                    raise ValueError(f"Invalid collision with no actual overlap (even accounting for "
++                                      f"conflict_time_margin) between wait actions {wait_action_1} and {wait_action_2}.")
++                total += violation
+ 
+         return total
+ 
+@@ -734,6 +749,20 @@ class ConflictManager:
+         ))
+         return conflicts
+ 
++    def _pad_intervals(self, intervals: list[Interval]) -> list[Interval]:
++        """TrajPlan-ScheMPC: widens each interval by ``conflict_time_margin`` on both ends.
++
++        Must mirror the padding ``_compute_uis`` applies when building the UI table -- these
++        intervals feed delta-BR's branching constraints (``get_move_move_next_safe_time``,
++        ``get_move_wait_intersection_intervals``), and a conflict can now be margin-induced only
++        (no raw geometric overlap), so an un-padded lookup here can fail to find any interval
++        containing the actual collision.
++        """
++        margin = self.config.solver_config.conflict_time_margin
++        if margin == 0.0:
++            return intervals
++        return [Interval(start=iv.start - margin, end=iv.end + margin) for iv in intervals]
++
+     def get_move_wait_intersection_intervals(self, move_action: MoveAction, wait_action: WaitAction):
+         """Returns the intersection interval(s) between a move action and a wait action.
+ 
+@@ -746,7 +775,7 @@ class ConflictManager:
+ 
+         ii_lookup = self._get_ii_lookup(moving_agent.type, waiting_agent.type)
+         unshifted_iis = ii_lookup.get_ev_intervals(moving_agent.type, move_action.edge, waiting_agent.type, wait_action.vertex)
+-        intersection_intervals = self._shift_instantaneous_intervals(unshifted_iis, move_action)
++        intersection_intervals = self._pad_intervals(self._shift_instantaneous_intervals(unshifted_iis, move_action))
+ 
+         return intersection_intervals
+ 
+@@ -758,7 +787,7 @@ class ConflictManager:
+ 
+         ii_lookup = self._get_ii_lookup(agent_1.type, agent_2.type)
+         unshifted_iis = ii_lookup.get_ee_intervals(agent_2.type, move_action_2.edge, agent_1.type, move_action_1.edge)
+-        intersection_intervals = self._shift_instantaneous_intervals(unshifted_iis, move_action_2)
++        intersection_intervals = self._pad_intervals(self._shift_instantaneous_intervals(unshifted_iis, move_action_2))
+ 
+         # The interval wanted is the one move_action_1 actually starts inside, so both ends of it
+         # have to be checked. Testing only `interval.start <= t_start` returns the first interval

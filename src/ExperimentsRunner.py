@@ -19,7 +19,7 @@ MPC_REASON_LABELS = {"late": "late_threshold"}
 
 RESULT_FIELDS = [
     "scheduler", "map", "scenario", "n_agents", "seed", "method",
-    "agent_radius",
+    "agent_radius", "conflict_time_margin",
     "scheduler_success", "total_travel_distance", "makespan", "sum_of_costs",
     "n_robots_finished", "mpc_failure_reason", "simulation_runtime_s",
     "n_nodes_compared", "n_nodes_missing",
@@ -121,7 +121,7 @@ def _write_instance_csv(instance_name, summary_row, merged):
 
 
 def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
-              agent_radius=None):
+              agent_radius=None, conflict_time_margin=None):
 
     os.makedirs(results_dir, exist_ok=True)
 
@@ -136,6 +136,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                             "scheduler": scheduler, "map": map, "scenario": scenario,
                             "n_agents": n_agent, "seed": seed, "method": method,
                             "agent_radius": agent_radius if agent_radius is not None else "",
+                            "conflict_time_margin": conflict_time_margin if conflict_time_margin is not None else "",
                             "scheduler_success": 0, "total_travel_distance": "", "makespan": "",
                             "sum_of_costs": "",
                             "n_robots_finished": "", "mpc_failure_reason": "", "simulation_runtime_s": "",
@@ -177,7 +178,6 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                                 naive_tracker=False,  # True = proportional baseline, False = NMPC (see mpc_backend)
                                 ignore_speed_ref=False,
                                 recording=False,
-                                agent_radius= 0.5,
                                 scheduler_backend=scheduler,  # "ComSat", "occbs", "aoccbs", or "pp_sipp"
                                 scheduler_timeout_s=60,
                                 assign_via_routing=False,
@@ -189,6 +189,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                                 collision_check=True,
                                 collision_margin=0.0,
                                 agent_radius=agent_radius,
+                                conflict_time_margin=conflict_time_margin,
                             )
 
                             # general_funct returns {"status": "no_schedule", ...} without ever
@@ -248,6 +249,7 @@ if __name__ == "__main__":
     method = "grid"  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
     agent_radius = None  # None, a metres float, or "mpc" -- see general_funct's docstring
+    conflict_time_margin = None  # seconds, aoccbs/pp_sipp only -- see general_funct's docstring
 
     ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method=method,
-              agent_radius=agent_radius)
+              agent_radius=agent_radius, conflict_time_margin=conflict_time_margin)
