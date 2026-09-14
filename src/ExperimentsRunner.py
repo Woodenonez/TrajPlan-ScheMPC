@@ -219,7 +219,11 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                             row["error"] = f"{type(exc).__name__}: {exc}"
 
                         _write_result_row(row)
-                        _write_instance_csv(f'{instance_name}_{scheduler}', row, merged)
+                        # conflict_time_margin=None falls back to the aoccbs/pp_sipp backends' own
+                        # 0.0 s default (see general_funct), so name the file after what actually ran.
+                        ctm_str = "0.0" if conflict_time_margin is None else str(conflict_time_margin)
+                        node_log_name = f'{instance_name}_{scheduler}_{method}_ctm{ctm_str}_nodeLog'
+                        _write_instance_csv(node_log_name, row, merged)
 
     return results_csv_path
 
