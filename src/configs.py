@@ -152,8 +152,7 @@ def resolve_fleet_distances(config_mpc: MpcConfiguration,
     """The (safe, critical) robot-to-robot distances in metres.
 
     `null` in the YAML means "derive from the robot spec", which is what PANOC does with its
-    own built-in constants. Shared by the CasADi tracker and the coordinator so the two can
-    never disagree about what counts as too close.
+    own built-in constants.
     """
     safe = (2*(config_robot.vehicle_width + config_robot.vehicle_margin)
             if config_mpc.fleet_safe_distance is None
