@@ -12,6 +12,7 @@ from basic_motion_model.motion_model import UnicycleModel
 from pkg_motion_plan import GlobalPathCoordinator
 from pkg_motion_plan import LocalTrajPlanner
 from pkg_motion_plan import logger_from_schedule
+from pkg_motion_plan import ScheduleAdherenceLogger
 from pkg_mpc_tracker import TrajectoryTracker
 from pkg_robot.robot import RobotManager
 
@@ -271,6 +272,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
 
     ### Set up robots
     robot_manager = RobotManager()
+    sched_adherence_logger = ScheduleAdherenceLogger()
     for rid in robot_ids:
         robot = robot_manager.create_robot(config_robot, UnicycleModel(sampling_time=config_robot.ts), rid)
         robot.set_state(np.asarray(robot_starts[str(rid)]))
@@ -285,6 +287,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
         path_coords, path_times = gpc.get_robot_schedule(rid)
         path_times = relax_final_eta(path_coords, path_times, config_robot.lin_vel_max)
         robot_manager.add_schedule(rid, np.asarray(robot_starts[str(rid)]), path_coords, path_times)
+        sched_adherence_logger.register_robot(rid, path_coords, path_times)
 
     ### Run
     main_plotter = None
@@ -351,6 +354,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
             # stamp is the time of the position being reported -- and so that a robot which
             # has already parked on its final node still gets that arrival recorded.
             arrival_logger.update(rid, kt*config_mpc.ts, robot.state[:2])
+            sched_adherence_logger.update(rid, kt*config_mpc.ts, robot.state[:2])
 
             if controller.idle:
                 if not headless:
@@ -523,6 +527,13 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
     if unreached:
         print(f"[run_mpc] Nodes never reached: {unreached}")
 
+    # Per-second actual-vs-schedule-expected (x, y) for every robot -- see
+    # ScheduleAdherenceLogger's docstring for how "expected" is computed.
+    sched_adherence_path = os.path.join(data_dir, f"SchedAdherence_{problem}.csv")
+    sched_adherence_logger.to_csv(sched_adherence_path)
+    if VERBOSE:
+        print(f"Schedule adherence log saved to: {sched_adherence_path}")
+
     # Non-convergence is per-solve and easy to miss tick by tick; the totals are not. A run
     # can finish "successfully" while a robot was steered by hundreds of non-optimal iterates.
     bad_exits = {rid: robot_manager.get_controller(rid).bad_exit_count for rid in robot_ids}
@@ -556,6 +567,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
         "ticks": kt,
         "time": kt*config_mpc.ts,
         "actual_schedule_path": actual_schedule_path,
+        "sched_adherence_path": sched_adherence_path,
         "n_robots_finished": n_robots_finished,
         "n_robots_total": len(robot_ids),
     }

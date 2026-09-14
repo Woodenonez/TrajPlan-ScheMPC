@@ -1,5 +1,6 @@
 import os
 import csv
+import shutil
 import pathlib
 
 import pandas as pd  # type: ignore
@@ -93,6 +94,19 @@ def _write_result_row(row):
         writer.writerow(row)
 
 
+def _copy_sched_adherence_csv(src_path, out_name):
+    """Copy run_mpc's per-second SchedAdherence_<instance_name>.csv (per agent, per second of
+    simulated time: actual (x, y) vs where the schedule expects the robot to be, assuming
+    constant speed across each scheduled ETA gap -- see `ScheduleAdherenceLogger`) into
+    data/results under `out_name`, alongside the other per-instance CSVs. Returns None (and
+    copies nothing) if the controller never ran or never wrote that file."""
+    if not src_path or not os.path.exists(src_path):
+        return None
+    out_path = os.path.join(results_dir, f"{out_name}.csv")
+    shutil.copyfile(src_path, out_path)
+    return out_path
+
+
 def _write_instance_csv(instance_name, summary_row, merged):
     """Per-instance CSV. One header line naming all 26 columns, then the summary line --
     the same fields written to experiments_results.csv, filling columns 1-21 only -- then
@@ -144,6 +158,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                             "mean_eta_diff_s": "", "max_abs_eta_diff_s": "", "error": "",
                         }
 
+                        sched_adherence_src = None
                         try:
                             # create instance
                             if method == "grid":
@@ -213,6 +228,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
 
                                 merged = _merged_schedule_df(instance_name)
                                 row.update(_schedule_diff_stats(merged))
+                                sched_adherence_src = result.get("sched_adherence_path")
 
                         except Exception as exc:
                             merged = None
@@ -224,6 +240,8 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                         ctm_str = "0.0" if conflict_time_margin is None else str(conflict_time_margin)
                         node_log_name = f'{instance_name}_{scheduler}_{method}_ctm{ctm_str}_nodeLog'
                         _write_instance_csv(node_log_name, row, merged)
+                        sched_adher_name = f'{instance_name}_{scheduler}_{method}_ctm{ctm_str}_SchedAdher'
+                        _copy_sched_adherence_csv(sched_adherence_src, sched_adher_name)
 
     return results_csv_path
 
