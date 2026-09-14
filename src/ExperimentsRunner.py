@@ -25,6 +25,7 @@ RESULT_FIELDS = [
     "n_robots_finished", "mpc_failure_reason",
     "n_nodes_compared", "n_nodes_missing",
     "mean_eta_diff_s", "max_abs_eta_diff_s",
+    "mean_schedule_adherence_m",
     "error",
 ]
 
@@ -111,6 +112,20 @@ def _write_result_row(row):
         writer.writerow(row)
 
 
+def _mean_schedule_adherence(src_path):
+    """Average positional deviation (metres) between a robot's actual and schedule-expected
+    (x, y), over every row -- every robot, every second -- of run_mpc's per-second
+    SchedAdherence_<instance_name>.csv (see `ScheduleAdherenceLogger`). Blank if the controller
+    never ran or never wrote that file."""
+    if not src_path or not os.path.exists(src_path):
+        return ""
+    df = pd.read_csv(src_path)
+    if df.empty:
+        return ""
+    deviation = ((df["actual_x"] - df["expected_x"])**2 + (df["actual_y"] - df["expected_y"])**2)**0.5
+    return round(float(deviation.mean()), 6)
+
+
 def _copy_sched_adherence_csv(src_path, out_name):
     """Copy run_mpc's per-second SchedAdherence_<instance_name>.csv (per agent, per second of
     simulated time: actual (x, y) vs where the schedule expects the robot to be, assuming
@@ -165,7 +180,8 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                             "scheduler_success": 0, "sum_of_costs": "", "actual_sum_of_cost": "",
                             "n_robots_finished": "", "mpc_failure_reason": "",
                             "n_nodes_compared": 0, "n_nodes_missing": "",
-                            "mean_eta_diff_s": "", "max_abs_eta_diff_s": "", "error": "",
+                            "mean_eta_diff_s": "", "max_abs_eta_diff_s": "",
+                            "mean_schedule_adherence_m": "", "error": "",
                         }
 
                         sched_adherence_src = None
@@ -237,6 +253,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                                 row.update(_schedule_diff_stats(merged))
                                 row["actual_sum_of_cost"] = _actual_sum_of_cost(merged)
                                 sched_adherence_src = result.get("sched_adherence_path")
+                                row["mean_schedule_adherence_m"] = _mean_schedule_adherence(sched_adherence_src)
 
                         except Exception as exc:
                             merged = None
