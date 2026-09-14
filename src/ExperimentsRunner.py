@@ -25,6 +25,7 @@ RESULT_FIELDS = [
     "n_robots_finished", "mpc_failure_reason",
     "n_nodes_compared", "n_nodes_missing",
     "mean_eta_diff_s", "max_abs_eta_diff_s",
+    "mean_schedule_adherence_m",
     "error",
 ]
 
@@ -111,6 +112,20 @@ def _write_result_row(row):
         writer.writerow(row)
 
 
+def _mean_schedule_adherence(src_path):
+    """Average positional deviation (metres) between a robot's actual and schedule-expected
+    (x, y), over every row -- every robot, every second -- of run_mpc's per-second
+    SchedAdherence_<instance_name>.csv (see `ScheduleAdherenceLogger`). Blank if the controller
+    never ran or never wrote that file."""
+    if not src_path or not os.path.exists(src_path):
+        return ""
+    df = pd.read_csv(src_path)
+    if df.empty:
+        return ""
+    deviation = ((df["actual_x"] - df["expected_x"])**2 + (df["actual_y"] - df["expected_y"])**2)**0.5
+    return round(float(deviation.mean()), 6)
+
+
 def _copy_sched_adherence_csv(src_path, out_name):
     """Copy run_mpc's per-second SchedAdherence_<instance_name>.csv (per agent, per second of
     simulated time: actual (x, y) vs where the schedule expects the robot to be, assuming
@@ -124,27 +139,20 @@ def _copy_sched_adherence_csv(src_path, out_name):
     return out_path
 
 
-def _write_instance_csv(instance_name, summary_row, merged):
-    """Per-instance CSV. One header line naming RESULT_FIELDS plus the five node_fields, then
-    the summary line -- the same fields written to experiments_results.csv, filling the
-    RESULT_FIELDS columns only -- then one line per scheduled node in the node_fields columns:
-    the full planned-vs-actual breakdown, i.e. schedule.csv and Actual_<instance_name>.csv
-    joined on (robot_id, node_id). The summary is written once rather than repeated on every
-    node line."""
+def _write_instance_csv(instance_name, merged):
+    """Per-instance node log: just the planned-vs-actual ETA breakdown, one line per scheduled
+    node -- i.e. schedule.csv and Actual_<instance_name>.csv joined on (robot_id, node_id).
+    The run's summary fields (RESULT_FIELDS) live in experiments_results.csv only; this file
+    carries no per-run identification of its own."""
     node_fields = ["robot_id", "node_id", "ETA_planned", "ETA_actual", "ETA_diff"]
-    fieldnames = RESULT_FIELDS + node_fields
-    blank_summary = {f: "" for f in RESULT_FIELDS}
-    blank_nodes = {f: "" for f in node_fields}
     out_path = os.path.join(results_dir, f"{instance_name}.csv")
 
     with open(out_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=node_fields)
         writer.writeheader()
-        writer.writerow({**summary_row, **blank_nodes})
         if merged is not None and not merged.empty:
             for _, node_row in merged.iterrows():
                 writer.writerow({
-                    **blank_summary,
                     "robot_id": node_row["robot_id"], "node_id": node_row["node_id"],
                     "ETA_planned": node_row["ETA_planned"], "ETA_actual": node_row["ETA_actual"],
                     "ETA_diff": node_row["ETA_diff"],
@@ -172,7 +180,8 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                             "scheduler_success": 0, "sum_of_costs": "", "actual_sum_of_cost": "",
                             "n_robots_finished": "", "mpc_failure_reason": "",
                             "n_nodes_compared": 0, "n_nodes_missing": "",
-                            "mean_eta_diff_s": "", "max_abs_eta_diff_s": "", "error": "",
+                            "mean_eta_diff_s": "", "max_abs_eta_diff_s": "",
+                            "mean_schedule_adherence_m": "", "error": "",
                         }
 
                         sched_adherence_src = None
@@ -244,6 +253,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                                 row.update(_schedule_diff_stats(merged))
                                 row["actual_sum_of_cost"] = _actual_sum_of_cost(merged)
                                 sched_adherence_src = result.get("sched_adherence_path")
+                                row["mean_schedule_adherence_m"] = _mean_schedule_adherence(sched_adherence_src)
 
                         except Exception as exc:
                             merged = None
@@ -254,7 +264,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                         # 0.0 s default (see general_funct), so name the file after what actually ran.
                         ctm_str = "0.0" if conflict_time_margin is None else str(conflict_time_margin)
                         node_log_name = f'{instance_name}_{scheduler}_{method}_ctm{ctm_str}_nodeLog'
-                        _write_instance_csv(node_log_name, row, merged)
+                        _write_instance_csv(node_log_name, merged)
                         sched_adher_name = f'{instance_name}_{scheduler}_{method}_ctm{ctm_str}_SchedAdher'
                         _copy_sched_adherence_csv(sched_adherence_src, sched_adher_name)
 
