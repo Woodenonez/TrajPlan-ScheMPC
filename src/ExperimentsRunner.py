@@ -160,8 +160,73 @@ def _write_instance_csv(instance_name, merged):
     return out_path
 
 
+def _method_label(method, connectedness):
+    """The value stored in experiments_results.csv's "method" column: "grid" is parameterised
+    by its roadmap connectedness (e.g. "grid(4)"), since that knob changes the instance graph;
+    "sampled" carries no such suffix, since its own knobs (density/clearance) live elsewhere."""
+    return f"{method}({connectedness})" if method == "grid" else method
+
+
+def _failed_instances(prev_value, schedulers, maps, scenarios, n_agents, seeds, method,
+                       value_column="conflict_time_margin", fail_reasons=None):
+    """(scheduler, map, scenario, n_agent, seed) combos -- drawn from the given lists -- whose
+    row in experiments_results.csv at `value_column` == prev_value (same method) counts as
+    failed. Used to re-run, at the next value in a sweep, only the instances the previous value
+    failed on; a row that succeeded is never retried. Returns [] if experiments_results.csv
+    doesn't exist yet, or no prior row matches.
+
+    `method` must be the exact label stored in the "method" column (see `_method_label`), e.g.
+    "grid(4)" rather than bare "grid".
+
+    What counts as failed is controlled by `fail_reasons`:
+    - None (the ctm sweep's original behaviour): finished fewer robots than n_agents, or has no
+      usable n_robots_finished at all (blank, e.g. an exception or a "no_schedule" run).
+    - a collection of `mpc_failure_reason` values (e.g. the agent_radius sweep's
+      {"late_threshold", "collision"}): only those specific failure modes count, since e.g. a
+      scheduler failure or a stuck/timeout abort would not be fixed by the swept parameter."""
+    if not os.path.exists(results_csv_path):
+        return []
+
+    df = pd.read_csv(results_csv_path, dtype=str, keep_default_na=False)
+    prev_value_str = "" if prev_value is None else str(prev_value)
+    scenario_strs = {str(s) for s in scenarios}
+    n_agent_strs = {str(n) for n in n_agents}
+    seed_strs = {str(s) for s in seeds}
+
+    mask = (
+        (df["method"] == method)
+        & (df[value_column] == prev_value_str)
+        & (df["scheduler"].isin(schedulers))
+        & (df["map"].isin(maps))
+        & (df["scenario"].isin(scenario_strs))
+        & (df["n_agents"].isin(n_agent_strs))
+        & (df["seed"].isin(seed_strs))
+    )
+    # experiments_results.csv is append-only, so the same combo can have been (re-)run more
+    # than once at this value_column setting across separate sweeps; judge failure on each
+    # combo's most recent row only, not on every historical attempt.
+    candidates = df[mask].drop_duplicates(
+        subset=["scheduler", "map", "scenario", "n_agents", "seed"], keep="last"
+    )
+
+    if fail_reasons is not None:
+        failed = candidates[candidates["mpc_failure_reason"].isin(fail_reasons)]
+    else:
+        finished = pd.to_numeric(candidates["n_robots_finished"], errors="coerce")
+        n_agents_num = pd.to_numeric(candidates["n_agents"], errors="coerce")
+        failed = candidates[finished.isna() | (finished < n_agents_num)]
+
+    return [
+        (row["scheduler"], row["map"], row["scenario"], int(row["n_agents"]), int(row["seed"]))
+        for _, row in failed.iterrows()
+    ]
+
+
 def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
-              agent_radius=None, conflict_time_margin=None):
+              connectedness=4, agent_radius=None, conflict_time_margin=None):
+    print('Agent radius:', agent_radius)
+
+    method_label = _method_label(method, connectedness)  # e.g. "grid(4)"; only "grid" uses it
 
     os.makedirs(results_dir, exist_ok=True)
 
@@ -174,7 +239,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                         instance_name = f'{map}_scenario-{scenario}_{n_agent}_{seed}'
                         row = {
                             "scheduler": scheduler, "map": map, "scenario": scenario,
-                            "n_agents": n_agent, "seed": seed, "method": method,
+                            "n_agents": n_agent, "seed": seed, "method": method_label,
                             "agent_radius": agent_radius if agent_radius is not None else "",
                             "conflict_time_margin": conflict_time_margin if conflict_time_margin is not None else "",
                             "scheduler_success": 0, "sum_of_costs": "", "actual_sum_of_cost": "",
@@ -194,7 +259,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                                     scenario=f'random-{scenario}',
                                     seed=seed,
                                     method=method,
-                                    connectedness=4, # only for "grid"
+                                    connectedness=connectedness, # only for "grid"
                                     simplify=True, # only for "grid
                                     cell_size=2,
                                     out_name=instance_name,
@@ -260,19 +325,23 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                             row["error"] = f"{type(exc).__name__}: {exc}"
 
                         _write_result_row(row)
+                        # agent_radius=None falls back to the aoccbs/pp_sipp backends' own
+                        # DEFAULT_AGENT_RADIUS (0.35 m); "mpc" is resolved internally by
+                        # general_funct but not passed back here, so it's named literally.
+                        rd_str = "0.35" if agent_radius is None else str(agent_radius)
                         # conflict_time_margin=None falls back to the aoccbs/pp_sipp backends' own
                         # 0.0 s default (see general_funct), so name the file after what actually ran.
                         ctm_str = "0.0" if conflict_time_margin is None else str(conflict_time_margin)
-                        node_log_name = f'{instance_name}_{scheduler}_{method}_ctm{ctm_str}_nodeLog'
+                        node_log_name = f'{instance_name}_{scheduler}_{method_label}_rd{rd_str}_ctm{ctm_str}_nodeLog'
                         _write_instance_csv(node_log_name, merged)
-                        sched_adher_name = f'{instance_name}_{scheduler}_{method}_ctm{ctm_str}_SchedAdher'
+                        sched_adher_name = f'{instance_name}_{scheduler}_{method_label}_rd{rd_str}_ctm{ctm_str}_SchedAdher'
                         _copy_sched_adherence_csv(sched_adherence_src, sched_adher_name)
 
     return results_csv_path
 
 if __name__ == "__main__":
 
-    schedulers = ['aoccbs','pp_sipp'] # ComSat, occbs, aoccbs, or pp_sipp
+    schedulers = ['aoccbs'] # ComSat, occbs, aoccbs, or pp_sipp
 
     maps = [
             # 'den312d',
@@ -283,20 +352,57 @@ if __name__ == "__main__":
     scenarios = ['1']
 
     n_agents = [
-        # 4,5,6,7,8,9,10,
-        # 11,12,13,14,15,16,17,18,19,20,
+        # 4
         21,22,23,24,25,26,27,28,29,30,
         31,32,33,34,35,36,37,38,39,40,
     ]
 
     seeds = [
-        7
+        5,6,7,8,9
     ]
 
-    method = "grid"  # "grid" or "sampled" -- how convert_movingai builds the instance graph
+    methods = ["grid","sampled"]  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
-    agent_radius = None  # None, a metres float, or "mpc" -- see general_funct's docstring
-    conflict_time_margin = None  # seconds, aoccbs/pp_sipp only -- see general_funct's docstring
+    connectedness = 4  # roadmap connectedness for "grid" instances only; ignored for "sampled"
 
-    ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method=method,
-              agent_radius=agent_radius, conflict_time_margin=conflict_time_margin)
+    # Which knob this run sweeps -- "agent_radius" or "conflict_time_margin". The other one is
+    # held at its default (None) for every instance in the sweep.
+    sweep_param = "agent_radius"
+
+    agent_radi = [
+                  1,1.25,1.5,1.75,2,2.25,2.5
+                  ]
+    agent_radii = [0.35 * m for m in agent_radi]
+
+    ctms = [0,10,15,20,25,30]
+
+    if sweep_param == "agent_radius":
+        sweep_values = agent_radii
+        # only retry, at the next radius, the instances that failed specifically on
+        # late_threshold or collision at the previous radius -- a run that already
+        # succeeded is left alone, and a failure mode a bigger radius can't fix
+        # (scheduler failure, stuck, timeout) is not retried either.
+        fail_reasons = ("late_threshold", "collision")
+    elif sweep_param == "conflict_time_margin":
+        sweep_values = ctms
+        # a bigger margin can't fix a scheduler failure, stuck robot, or timeout either, but it
+        # also can't be judged by late/collision alone -- any instance that didn't finish every
+        # robot counts as failed (see _failed_instances' fail_reasons=None branch).
+        fail_reasons = None
+    else:
+        raise ValueError(f"sweep_param must be 'agent_radius' or 'conflict_time_margin', got {sweep_param!r}")
+
+    for method in methods:
+        method_label = _method_label(method, connectedness)
+        # sweep_values[0] is already fully run (see experiments_results.csv) -- start the retry
+        # chain from it instead of re-running the whole grid at that value.
+        prev_value = sweep_values[0]
+        for value in sweep_values[1:]:
+            retry = _failed_instances(prev_value, schedulers, maps, scenarios, n_agents, seeds, method_label,
+                                       value_column=sweep_param,
+                                       fail_reasons=fail_reasons)
+            for scheduler, map_name, scenario, n_agent, seed in retry:
+                sweep_kwargs = {"agent_radius": None, "conflict_time_margin": None, sweep_param: value}
+                ExpRunner([scheduler], [map_name], [scenario], [n_agent], [seed],
+                          method=method, connectedness=connectedness, **sweep_kwargs)
+            prev_value = value
