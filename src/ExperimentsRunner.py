@@ -2,6 +2,8 @@ import os
 import csv
 import shutil
 import pathlib
+import multiprocessing as mp
+import concurrent.futures as cf
 
 import pandas as pd  # type: ignore
 
@@ -229,126 +231,291 @@ def _failed_instances(prev_value, schedulers, maps, scenarios, n_agents, seeds, 
     ]
 
 
+def _available_cores():
+    """The CPU core ids this process may actually be scheduled on -- respects a taskset/cgroup
+    restriction on Linux -- or, on a platform with no affinity API at all (notably macOS), every
+    logical core by count. Used to pick default core assignments in `_dispatch_jobs`."""
+    if hasattr(os, "sched_getaffinity"):
+        return sorted(os.sched_getaffinity(0))
+    return list(range(os.cpu_count() or 1))
+
+
+def _pin_worker(counter, lock, cores):
+    """`ProcessPoolExecutor` initializer: claim this worker's index off a shared counter (so
+    concurrently-starting workers never claim the same one) and pin the process to
+    `cores[index % len(cores)]` for the rest of its life.
+
+    CPU affinity is inherited by everything the process goes on to do -- its own threads
+    (numpy/BLAS, Gurobi) and any subprocesses it forks (AOC-CBS's own internal search-pool
+    processes) -- so this is what actually keeps one instance's work off a core another worker
+    owns, regardless of how many threads/processes that instance's scheduler backend tries to
+    spin up internally. Anything that lands on the same pinned core just time-shares it.
+
+    No-op, with a one-time printed warning, on a platform with no `os.sched_setaffinity` --
+    there is no such call on macOS at all, so `n_workers` still caps how many instances run at
+    once there, just not to specific cores."""
+    with lock:
+        index = counter.value
+        counter.value += 1
+    if not hasattr(os, "sched_setaffinity"):
+        print(f"[ExperimentsRunner] worker pid={os.getpid()}: CPU pinning unavailable on this "
+              f"OS (no os.sched_setaffinity, e.g. macOS) -- limited to n_workers concurrency, "
+              f"not pinned to a dedicated core.", flush=True)
+        return
+    core_id = cores[index % len(cores)]
+    os.sched_setaffinity(0, {core_id})
+    print(f"[ExperimentsRunner] worker pid={os.getpid()} pinned to core {core_id}", flush=True)
+
+
+def _run_one_combo(job):
+    """Run a single (scheduler, map, scenario, n_agents, seed) combo end to end -- generate the
+    instance, run the scheduler+controller, and write this combo's own node-log and
+    schedule-adherence CSVs -- and return the experiments_results.csv row for it.
+
+    `job` is a plain dict (picklable, for `_dispatch_jobs`'s process pool) with keys: scheduler,
+    map, scenario, n_agent, seed, method, connectedness, method_label, agent_radius,
+    conflict_time_margin.
+
+    Writing the row itself to experiments_results.csv is left to the caller, since that file is
+    shared across every combo in a sweep and `_dispatch_jobs` is what serialises those writes
+    when combos run in separate processes."""
+    scheduler = job["scheduler"]
+    map_name = job["map"]
+    scenario = job["scenario"]
+    n_agent = job["n_agent"]
+    seed = job["seed"]
+    method = job["method"]
+    connectedness = job["connectedness"]
+    method_label = job["method_label"]
+    agent_radius = job["agent_radius"]
+    conflict_time_margin = job["conflict_time_margin"]
+
+    instance_name = f'{map_name}_scenario-{scenario}_{n_agent}_{seed}'
+    row = {
+        "scheduler": scheduler, "map": map_name, "scenario": scenario,
+        "n_agents": n_agent, "seed": seed, "method": method_label,
+        "agent_radius": agent_radius if agent_radius is not None else "",
+        "conflict_time_margin": conflict_time_margin if conflict_time_margin is not None else "",
+        "scheduler_success": 0, "sum_of_costs": "", "actual_sum_of_cost": "",
+        "n_robots_finished": "", "mpc_failure_reason": "",
+        "n_nodes_compared": 0, "n_nodes_missing": "",
+        "mean_eta_diff_s": "", "max_abs_eta_diff_s": "",
+        "mean_schedule_adherence_m": "", "error": "",
+    }
+
+    sched_adherence_src = None
+    merged = None
+    try:
+        # create instance
+        if method == "grid":
+            convert_movingai(
+                map_name=map_name,
+                n_agents=n_agent,
+                scenario=f'random-{scenario}',
+                seed=seed,
+                method=method,
+                connectedness=connectedness, # only for "grid"
+                simplify=True, # only for "grid
+                cell_size=2,
+                out_name=instance_name,
+            )
+        elif method == "sample":
+            convert_movingai(
+                map_name=map_name,
+                n_agents=n_agent,
+                scenario=f'random-{scenario}',
+                seed=seed,
+                method=method,
+                clearance=0.7,  # only for "sampled"
+                density=0.1,  # only for "sampled"
+                cell_size=2,
+                out_name=instance_name,
+            )
+
+        result = general_funct(
+            instance_name,
+            scheduler=True,
+            controller=True,
+            naive_tracker=False,  # True = proportional baseline, False = NMPC (see mpc_backend)
+            ignore_speed_ref=False,
+            recording=False,
+            scheduler_backend=scheduler,  # "ComSat", "occbs", "aoccbs", or "pp_sipp"
+            scheduler_timeout_s=60,
+            assign_via_routing=False,
+            first_solution_only=False,
+            mpc_backend="panoc",
+            headless=True,
+            late_threshold_s=30.0,
+            stuck_timeout_s=False,
+            collision_check=True,
+            collision_margin=0.0,
+            agent_radius=agent_radius,
+            conflict_time_margin=conflict_time_margin,
+            # Keys schedule.csv/robot_start.json/Actual_*.csv/SchedAdherence_*.csv by
+            # instance_name instead of the fixed default names, so this instance's run can't
+            # collide with a different instance's run in flight at the same time (see
+            # `_dispatch_jobs`).
+            run_tag=instance_name,
+        )
+
+        # general_funct returns {"status": "no_schedule", ...} without ever
+        # touching the controller when the scheduler can't find a solution
+        # (see Compo_slim's empty solution on unsat/unknown); any other status
+        # comes from run_mpc, i.e. the scheduler succeeded.
+        scheduler_success = result.get("status") != "no_schedule"
+        row["scheduler_success"] = int(scheduler_success)
+
+        if scheduler_success:
+            row["sum_of_costs"] = result.get("sum_of_costs", "")
+
+            mpc_status = result.get("status")
+            row["n_robots_finished"] = result.get("n_robots_finished", "")
+            if mpc_status != "success":
+                row["mpc_failure_reason"] = MPC_REASON_LABELS.get(mpc_status, mpc_status)
+
+            merged = _merged_schedule_df(instance_name)
+            row.update(_schedule_diff_stats(merged))
+            row["actual_sum_of_cost"] = _actual_sum_of_cost(merged)
+            sched_adherence_src = result.get("sched_adherence_path")
+            row["mean_schedule_adherence_m"] = _mean_schedule_adherence(sched_adherence_src)
+
+    except Exception as exc:
+        merged = None
+        row["error"] = f"{type(exc).__name__}: {exc}"
+
+    # agent_radius=None falls back to the aoccbs/pp_sipp backends' own
+    # DEFAULT_AGENT_RADIUS (0.35 m); "mpc" is resolved internally by
+    # general_funct but not passed back here, so it's named literally.
+    rd_str = "0.35" if agent_radius is None else str(agent_radius)
+    # conflict_time_margin=None falls back to the aoccbs/pp_sipp backends' own
+    # 0.0 s default (see general_funct), so name the file after what actually ran.
+    ctm_str = "0.0" if conflict_time_margin is None else str(conflict_time_margin)
+    node_log_name = f'{instance_name}_{scheduler}_{method_label}_rd{rd_str}_ctm{ctm_str}_nodeLog'
+    _write_instance_csv(node_log_name, merged)
+    sched_adher_name = f'{instance_name}_{scheduler}_{method_label}_rd{rd_str}_ctm{ctm_str}_SchedAdher'
+    _copy_sched_adherence_csv(sched_adherence_src, sched_adher_name)
+
+    return row
+
+
+def _dispatch_jobs(jobs, n_workers=None, cpu_ids=None):
+    """Run a flat list of `_run_one_combo` job specs and append each one's result row to
+    experiments_results.csv as soon as it's ready.
+
+    n_workers=None (or <=1, the default) runs the jobs one at a time, in order, in this process
+    -- unchanged from ExpRunner's original behaviour.
+
+    n_workers>1 runs up to that many instances at once, each in its own worker process pinned
+    to its own CPU core for its whole life (see `_pin_worker`). `cpu_ids` picks which cores --
+    default is every core this process can currently run on (`_available_cores()`); pass a
+    shorter explicit list to reserve some cores for other work on a shared machine. If
+    n_workers exceeds the number of cores given/available, cores are reused round-robin and a
+    warning is printed -- parallelism still works, it just stops being one-instance-per-core.
+
+    Two jobs that share an instance_name (same map/scenario/n_agents/seed -- e.g. the same
+    generated instance compared across two entries in `schedulers`) are never allowed in flight
+    together, no matter how many workers are free: `convert_movingai`'s `_write` unconditionally
+    deletes that instance's AOC-CBS state-graph/preprocessing cache on every regeneration
+    (`_clear_aoccbs_cache` in roadmap_to_testcase.py), so two concurrent writers for the same
+    instance would race on both the test-case JSON and that cache. Jobs with the same
+    instance_name are therefore queued and always run strictly one after another; only jobs for
+    genuinely different instances actually overlap. `run_tag` (see `_run_one_combo`) is what
+    keeps their schedule.csv/robot_start.json/Actual_*.csv files from colliding once they do.
+
+    A "ComSat" job (or any aoccbs/pp_sipp job run with assign_via_routing=True) and AOC-CBS's
+    own internal search-pool processes may still try to use more than one thread/process for a
+    single instance; the CPU affinity pin is what stops that from spreading onto another
+    worker's core (anything sharing the pinned core just contends for it), not a per-library
+    thread-count setting. OMP_NUM_THREADS and friends are additionally capped to 1 below purely
+    to cut down on wasted contention on that one core -- the dedicated-core guarantee itself
+    comes from the affinity pin."""
+    if not jobs:
+        return
+    os.makedirs(results_dir, exist_ok=True)
+    if n_workers is None or n_workers <= 1:
+        for job in jobs:
+            _write_result_row(_run_one_combo(job))
+        return
+
+    cores = list(cpu_ids) if cpu_ids else _available_cores()
+    if n_workers > len(cores):
+        print(f"[ExperimentsRunner] n_workers={n_workers} exceeds {len(cores)} available "
+              f"core(s) -- some workers will share a core.", flush=True)
+
+    # Cuts down on wasted thread contention on each worker's one pinned core -- set before the
+    # pool is created so every worker inherits it as part of its own OS environment, ahead of
+    # any of its own imports (a BLAS library typically sizes its thread pool once, on first use).
+    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+        os.environ.setdefault(var, "1")
+
+    def _instance_name(job):
+        return f'{job["map"]}_scenario-{job["scenario"]}_{job["n_agent"]}_{job["seed"]}'
+
+    # Deliberately "spawn", not the platform default -- macOS has no other option, and on Linux
+    # a plain fork() of a process that already holds Gurobi/BLAS locks or background threads is
+    # a well-known way to deadlock a child before it ever runs anything.
+    mp_ctx = mp.get_context("spawn")
+    counter = mp_ctx.Value('i', 0)
+    lock = mp_ctx.Lock()
+
+    pending = list(jobs)
+    in_flight = {}  # future -> instance_name
+    active_instances = set()
+    with cf.ProcessPoolExecutor(max_workers=n_workers, mp_context=mp_ctx,
+                                 initializer=_pin_worker, initargs=(counter, lock, cores)) as executor:
+        while pending or in_flight:
+            submitted = True
+            while submitted and len(in_flight) < n_workers:
+                submitted = False
+                for idx, job in enumerate(pending):
+                    inst = _instance_name(job)
+                    if inst not in active_instances:
+                        future = executor.submit(_run_one_combo, job)
+                        in_flight[future] = inst
+                        active_instances.add(inst)
+                        pending.pop(idx)
+                        submitted = True
+                        break
+
+            done, _ = cf.wait(in_flight.keys(), return_when=cf.FIRST_COMPLETED)
+            for future in done:
+                inst = in_flight.pop(future)
+                active_instances.discard(inst)
+                _write_result_row(future.result())
+
+
 def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
-              connectedness=4, agent_radius=None, conflict_time_margin=None):
+              connectedness=4, agent_radius=None, conflict_time_margin=None,
+              n_workers=None, cpu_ids=None):
+    """Run every combo in the cross product of schedulers x maps x scenarios x n_agents x
+    seeds, at the given method/connectedness/agent_radius/conflict_time_margin, and append
+    each combo's row to experiments_results.csv.
+
+    n_workers / cpu_ids: see `_dispatch_jobs` -- None (default) runs every combo sequentially,
+    exactly as this function always has; an int > 1 runs up to that many instances at once,
+    each pinned to its own CPU core (combos that share an instance_name, e.g. the same instance
+    compared across two entries in `schedulers`, still run one after another)."""
     print('Agent radius:', agent_radius)
 
     method_label = _method_label(method, connectedness)  # e.g. "grid(4)"; only "grid" uses it
 
     os.makedirs(results_dir, exist_ok=True)
 
-    for scheduler in schedulers:
-        for map in maps:
-            for scenario in scenarios:
-                for n_agent in n_agents:
-                    for seed in seeds:
-
-                        instance_name = f'{map}_scenario-{scenario}_{n_agent}_{seed}'
-                        row = {
-                            "scheduler": scheduler, "map": map, "scenario": scenario,
-                            "n_agents": n_agent, "seed": seed, "method": method_label,
-                            "agent_radius": agent_radius if agent_radius is not None else "",
-                            "conflict_time_margin": conflict_time_margin if conflict_time_margin is not None else "",
-                            "scheduler_success": 0, "sum_of_costs": "", "actual_sum_of_cost": "",
-                            "n_robots_finished": "", "mpc_failure_reason": "",
-                            "n_nodes_compared": 0, "n_nodes_missing": "",
-                            "mean_eta_diff_s": "", "max_abs_eta_diff_s": "",
-                            "mean_schedule_adherence_m": "", "error": "",
-                        }
-
-                        sched_adherence_src = None
-                        try:
-                            # create instance
-                            if method == "grid":
-                                convert_movingai(
-                                    map_name=map,
-                                    n_agents=n_agent,
-                                    scenario=f'random-{scenario}',
-                                    seed=seed,
-                                    method=method,
-                                    connectedness=connectedness, # only for "grid"
-                                    simplify=True, # only for "grid
-                                    cell_size=2,
-                                    out_name=instance_name,
-                                )
-                            elif method == "sample":
-                                convert_movingai(
-                                    map_name=map,
-                                    n_agents=n_agent,
-                                    scenario=f'random-{scenario}',
-                                    seed=seed,
-                                    method=method,
-                                    clearance=0.7,  # only for "sampled"
-                                    density=0.1,  # only for "sampled"
-                                    cell_size=2,
-                                    out_name=instance_name,
-                                )
-
-                            result = general_funct(
-                                instance_name,
-                                scheduler=True,
-                                controller=True,
-                                naive_tracker=False,  # True = proportional baseline, False = NMPC (see mpc_backend)
-                                ignore_speed_ref=False,
-                                recording=False,
-                                scheduler_backend=scheduler,  # "ComSat", "occbs", "aoccbs", or "pp_sipp"
-                                scheduler_timeout_s=60,
-                                assign_via_routing=False,
-                                first_solution_only=False,
-                                mpc_backend="panoc",
-                                headless=True,
-                                late_threshold_s=30.0,
-                                stuck_timeout_s=False,
-                                collision_check=True,
-                                collision_margin=0.0,
-                                agent_radius=agent_radius,
-                                conflict_time_margin=conflict_time_margin,
-                                # Keys schedule.csv/robot_start.json/Actual_*.csv/
-                                # SchedAdherence_*.csv by instance_name instead of the fixed
-                                # default names, so this instance's run can't collide with a
-                                # different instance's run against the same project checkout
-                                # (e.g. two parallel Slurm shards -- see hpc/arrhenius/).
-                                run_tag=instance_name,
-                            )
-
-                            # general_funct returns {"status": "no_schedule", ...} without ever
-                            # touching the controller when the scheduler can't find a solution
-                            # (see Compo_slim's empty solution on unsat/unknown); any other status
-                            # comes from run_mpc, i.e. the scheduler succeeded.
-                            scheduler_success = result.get("status") != "no_schedule"
-                            row["scheduler_success"] = int(scheduler_success)
-
-                            merged = None
-                            if scheduler_success:
-                                row["sum_of_costs"] = result.get("sum_of_costs", "")
-
-                                mpc_status = result.get("status")
-                                row["n_robots_finished"] = result.get("n_robots_finished", "")
-                                if mpc_status != "success":
-                                    row["mpc_failure_reason"] = MPC_REASON_LABELS.get(mpc_status, mpc_status)
-
-                                merged = _merged_schedule_df(instance_name)
-                                row.update(_schedule_diff_stats(merged))
-                                row["actual_sum_of_cost"] = _actual_sum_of_cost(merged)
-                                sched_adherence_src = result.get("sched_adherence_path")
-                                row["mean_schedule_adherence_m"] = _mean_schedule_adherence(sched_adherence_src)
-
-                        except Exception as exc:
-                            merged = None
-                            row["error"] = f"{type(exc).__name__}: {exc}"
-
-                        _write_result_row(row)
-                        # agent_radius=None falls back to the aoccbs/pp_sipp backends' own
-                        # DEFAULT_AGENT_RADIUS (0.35 m); "mpc" is resolved internally by
-                        # general_funct but not passed back here, so it's named literally.
-                        rd_str = "0.35" if agent_radius is None else str(agent_radius)
-                        # conflict_time_margin=None falls back to the aoccbs/pp_sipp backends' own
-                        # 0.0 s default (see general_funct), so name the file after what actually ran.
-                        ctm_str = "0.0" if conflict_time_margin is None else str(conflict_time_margin)
-                        node_log_name = f'{instance_name}_{scheduler}_{method_label}_rd{rd_str}_ctm{ctm_str}_nodeLog'
-                        _write_instance_csv(node_log_name, merged)
-                        sched_adher_name = f'{instance_name}_{scheduler}_{method_label}_rd{rd_str}_ctm{ctm_str}_SchedAdher'
-                        _copy_sched_adherence_csv(sched_adherence_src, sched_adher_name)
+    jobs = [
+        {
+            "scheduler": scheduler, "map": map_name, "scenario": scenario,
+            "n_agent": n_agent, "seed": seed, "method": method,
+            "connectedness": connectedness, "method_label": method_label,
+            "agent_radius": agent_radius, "conflict_time_margin": conflict_time_margin,
+        }
+        for scheduler in schedulers
+        for map_name in maps
+        for scenario in scenarios
+        for n_agent in n_agents
+        for seed in seeds
+    ]
+    _dispatch_jobs(jobs, n_workers=n_workers, cpu_ids=cpu_ids)
 
     return results_csv_path
 
@@ -373,6 +540,13 @@ if __name__ == "__main__":
     seeds = [
         5,6,7,8,9
     ]
+
+    # How many instances to run at once, each pinned to its own CPU core (see
+    # `_dispatch_jobs`/`_pin_worker`). None or 1 = sequential, one instance at a time, exactly
+    # like this script always ran. cpu_ids=None uses every core this process can currently run
+    # on; pass an explicit list (e.g. [2, 3, 4, 5]) to reserve the rest for other work.
+    n_workers = 1
+    cpu_ids = None
 
     methods = ["grid","sampled"]  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
@@ -417,8 +591,16 @@ if __name__ == "__main__":
                 retry = _failed_instances(prev_value, schedulers, maps, scenarios, n_agents, seeds, method_label,
                                            value_column=sweep_param,
                                            fail_reasons=fail_reasons)
-                for scheduler, map_name, scenario, n_agent, seed in retry:
-                    sweep_kwargs = {"agent_radius": None, "conflict_time_margin": None, sweep_param: value}
-                    ExpRunner([scheduler], [map_name], [scenario], [n_agent], [seed],
-                              method=method, connectedness=connectedness, **sweep_kwargs)
+                sweep_kwargs = {"agent_radius": None, "conflict_time_margin": None, sweep_param: value}
+                jobs = [
+                    {
+                        "scheduler": scheduler, "map": map_name, "scenario": scenario,
+                        "n_agent": n_agent, "seed": seed, "method": method,
+                        "connectedness": connectedness, "method_label": method_label,
+                        "agent_radius": sweep_kwargs["agent_radius"],
+                        "conflict_time_margin": sweep_kwargs["conflict_time_margin"],
+                    }
+                    for scheduler, map_name, scenario, n_agent, seed in retry
+                ]
+                _dispatch_jobs(jobs, n_workers=n_workers, cpu_ids=cpu_ids)
                 prev_value = value
