@@ -42,7 +42,6 @@ preprocessing.
 import contextlib
 import io
 import json
-import os
 import pathlib
 import time
 
@@ -366,7 +365,12 @@ def AOCCBS(problem: str, agent_radius: float = DEFAULT_AGENT_RADIUS,
     sg_id = _build_state_graph(problem, data['test_data']['nodes'], verbose=verbose)
     am_id = create_circular_agent(agent_radius)
 
-    workers = workers or os.cpu_count() or 1
+    # Left as None rather than resolved to os.cpu_count() here: both calls below already
+    # resolve a None `workers` to models.core.ii_engine.default_workers(), which honours the
+    # AOCCBS_PP_WORKERS env var (falling back to os.cpu_count() only if it's unset). Resolving
+    # it here would bypass that -- and under Slurm, os.cpu_count() reports the whole node's
+    # logical CPUs regardless of what the job's cgroup actually granted, so a capped allocation
+    # would still spawn a full-node-sized worker pool.
     # AOC-CBS's own cache/progress prints (state_graph_distances.py, intersection_intervals.py)
     # are not gated by any flag it exposes, so silence them here when quiet rather than
     # patching the vendored library.

@@ -1,0 +1,33 @@
+# Excluded from the push to Arrhenius. Paths starting with / are relative to
+# the repository root.
+
+# The two solver checkouts. They are git submodules, so the cluster gets them
+# from its own copy of .git with "sync.sh submodules" rather than over rsync.
+# Keeping them out also protects the AOC-CBS run directories, which are written
+# inside external/AOC-CBS/ on the cluster and exist nowhere else.
+/external/
+
+# Platform-specific and rebuilt on the cluster. mpc_solver/ is build_solver.py's compiled
+# Rust/PANOC output (see hpc/arrhenius/build_panoc.sh) -- a macOS build pushed here would
+# silently overwrite the cluster's own Linux one, or vice versa.
+/.venv/
+/mpc_solver/
+
+# Editor and OS state.
+/.idea/
+.DS_Store
+
+# Editable installs. These record absolute paths from the machine that built
+# them, so pushing one would break the other machine's install.
+*.egg-info/
+
+# Caches.
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Results flow cluster -> laptop only ("pull"), never the other way: push has no --update, so
+# without this, pushing an older local data/results/ would silently overwrite newer results the
+# cluster has accumulated since the last pull.
+/data/results/
