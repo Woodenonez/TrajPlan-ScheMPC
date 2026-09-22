@@ -25,3 +25,46 @@
 [2026-09-14T09:51:34.322Z] [CodeGraph MCP] Auto-synced 1 file(s) in 194ms
 [2026-09-14T10:00:29.550Z] [CodeGraph MCP] Auto-synced 1 file(s) in 27ms
 [2026-09-14T10:00:44.521Z] [CodeGraph MCP] Auto-synced 1 file(s) in 26ms
+[2026-09-16T12:55:38.929Z] [CodeGraph daemon] Listening on /Users/sabinoroselli/PycharmProjects/TrajPlan-ScheMPC/.codegraph/daemon.sock (pid 20408, v1.6.0). Idle timeout 300000ms.
+[2026-09-16T12:55:38.997Z] [CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[2026-09-16T12:55:38.998Z] [CodeGraph MCP] Query pool: up to 10 worker thread(s) for concurrent reads.
+[2026-09-16T12:55:39.407Z] [CodeGraph MCP] Caught up 2 file(s) changed since last run
+[2026-09-16T12:57:56.373Z] [CodeGraph MCP] Auto-synced 1 file(s) in 48ms
+[2026-09-16T13:05:48.925Z] [CodeGraph MCP] Auto-synced 1 file(s) in 65ms
+[2026-09-16T13:07:46.431Z] [CodeGraph MCP] Auto-synced 1 file(s) in 53ms
+[2026-09-16T13:08:19.696Z] [CodeGraph MCP] Auto-synced 1 file(s) in 187ms
+[2026-09-16T13:09:28.790Z] [CodeGraph MCP] Auto-synced 1 file(s) in 49ms
+[2026-09-16T13:13:16.905Z] [CodeGraph MCP] Auto-synced 1 file(s) in 63ms
+[2026-09-16T14:23:59.754Z] [CodeGraph] Main thread unresponsive for ~60s — killing the wedged process so a fresh one can start (#850). Disable with CODEGRAPH_NO_WATCHDOG=1.
+[2026-09-16T14:24:36.488Z] [CodeGraph daemon] Listening on /Users/sabinoroselli/PycharmProjects/TrajPlan-ScheMPC/.codegraph/daemon.sock (pid 22010, v1.6.0). Idle timeout 300000ms.
+[2026-09-16T14:24:36.556Z] [CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[2026-09-16T14:24:36.558Z] [CodeGraph MCP] Query pool: up to 10 worker thread(s) for concurrent reads.
+[2026-09-16T15:45:31.626Z] [CodeGraph daemon] Shutting down (idle timeout; clients=0).
+[2026-09-17T13:35:08.803Z] [CodeGraph daemon] Listening on /Users/sabinoroselli/PycharmProjects/TrajPlan-ScheMPC/.codegraph/daemon.sock (pid 47499, v1.6.0). Idle timeout 300000ms.
+[2026-09-17T13:35:08.869Z] [CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[2026-09-17T13:35:08.870Z] [CodeGraph MCP] Query pool: up to 10 worker thread(s) for concurrent reads.
+[2026-09-17T13:35:09.220Z] [CodeGraph MCP] Caught up 1 file(s) changed since last run
+[2026-09-17T14:45:34.641Z] [CodeGraph daemon] Shutting down (idle timeout; clients=0).
+[2026-09-21T07:07:43.717Z] [CodeGraph daemon] Listening on /Users/sabinoroselli/PycharmProjects/TrajPlan-ScheMPC/.codegraph/daemon.sock (pid 15253, v1.6.0). Idle timeout 300000ms.
+[2026-09-21T07:07:43.785Z] [CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[2026-09-21T07:07:43.787Z] [CodeGraph MCP] Query pool: up to 10 worker thread(s) for concurrent reads.
+[2026-09-21T07:10:44.796Z] [CodeGraph MCP] Auto-synced 1 file(s) in 425ms
+[2026-09-21T07:10:50.847Z] [CodeGraph MCP] Auto-synced 1 file(s) in 55ms
+[2026-09-21T07:21:19.317Z] [CodeGraph MCP] Auto-synced 1 file(s) in 64ms
+[2026-09-21T07:21:31.504Z] [CodeGraph MCP] Auto-synced 1 file(s) in 58ms
+[2026-09-21T07:30:22.352Z] [CodeGraph MCP] Auto-synced 1 file(s) in 71ms
+[2026-09-21T07:31:00.555Z] [CodeGraph MCP] Auto-synced 1 file(s) in 89ms
+[2026-09-21T07:50:08.821Z] [CodeGraph daemon] Shutting down (SIGTERM; clients=1).
+[2026-09-22T12:14:06.078Z] [CodeGraph daemon] Listening on /Users/sabinoroselli/PycharmProjects/TrajPlan-ScheMPC/.codegraph/daemon.sock (pid 36558, v1.6.0). Idle timeout 300000ms.
+[2026-09-22T12:14:06.163Z] [CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[2026-09-22T12:14:06.164Z] [CodeGraph MCP] Query pool: up to 10 worker thread(s) for concurrent reads.
+[2026-09-22T12:17:20.927Z] [CodeGraph MCP] Auto-synced 1 file(s) in 147ms
+[2026-09-22T12:17:25.338Z] [CodeGraph MCP] Auto-synced 1 file(s) in 66ms
+[2026-09-22T12:17:29.927Z] [CodeGraph MCP] Auto-synced 1 file(s) in 124ms
+[2026-09-22T12:17:33.208Z] [CodeGraph MCP] Auto-synced 1 file(s) in 55ms
+[2026-09-22T12:17:37.859Z] [CodeGraph MCP] Auto-synced 1 file(s) in 70ms
+[2026-09-22T12:17:48.366Z] [CodeGraph MCP] Auto-synced 1 file(s) in 57ms
+[2026-09-22T12:36:59.854Z] [CodeGraph MCP] Auto-synced 1 file(s) in 69ms
+[2026-09-22T12:37:24.711Z] [CodeGraph MCP] Auto-synced 1 file(s) in 109ms
+[2026-09-22T12:38:05.104Z] [CodeGraph MCP] Auto-synced 1 file(s) in 48ms
+[2026-09-22T12:38:28.315Z] [CodeGraph MCP] Auto-synced 1 file(s) in 189ms
