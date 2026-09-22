@@ -151,6 +151,21 @@ file's header for what bounds the core count usefully (AOC-CBS's own solve
 pool is capped at 6 regardless -- `DEFAULT_SEARCH_PORTFOLIO`'s size -- so
 more cores only help preprocessing on a radius the cache hasn't seen yet).
 
+`ExpRunner` now passes `run_tag=instance_name` into `general_funct`, so two
+shards running *different* instances (the normal case -- `--shard-by`
+guarantees the n_agents/seeds lists it hands out don't overlap) no longer
+race on schedule.csv/robot_start.json/Actual_*.csv/SchedAdherence_*.csv (see
+`run_experiments.sbatch`'s header). What is still not safe is two shards
+processing the *same* instance (same map/scenario/n_agents/seed) at the same
+time, e.g. from two separately-submitted sweeps that happen to overlap:
+`convert_movingai` unconditionally deletes that instance's AOC-CBS
+state-graph/preprocessing cache every time it regenerates the instance
+(`_clear_aoccbs_cache`), so concurrent regeneration would race. Don't submit
+two sweeps whose (maps, scenarios, n_agents, seeds) intersect at the same
+time; if you need to compare schedulers on the same instances, put every
+scheduler you want compared in one `SCHEDULERS` list for that submission,
+same as running it locally.
+
 ## What syncs
 
 Everything in the repository except `external/`, `.venv/`, `mpc_solver/`,

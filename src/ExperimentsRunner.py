@@ -33,11 +33,17 @@ RESULT_FIELDS = [
 
 
 def _merged_schedule_df(instance_name):
-    """Join the planned schedule.csv against the realised Actual_<instance_name>.csv, both
-    in the robot_id,node_id,ETA format, on (robot_id, node_id). Returns None if either file
-    is missing (scheduler failed, so schedule.csv wasn't refreshed for this instance, or the
-    controller never ran)."""
-    schedule_path = os.path.join(schedule_dir, "schedule.csv")
+    """Join the planned schedule_<instance_name>.csv against the realised
+    Actual_<instance_name>.csv, both in the robot_id,node_id,ETA format, on
+    (robot_id, node_id). Returns None if either file is missing (scheduler failed, so
+    schedule_<instance_name>.csv wasn't written, or the controller never ran).
+
+    Both files are named after `instance_name` because `ExpRunner` passes it to
+    `general_funct` as `run_tag` (see its call below): several instances' scheduler+controller
+    runs can be in flight against this one shared project checkout at once -- e.g. parallel
+    Slurm shards on a cluster (hpc/arrhenius/) -- and a fixed "schedule.csv"/"Actual_*.csv"
+    name would let two such runs clobber each other's files."""
+    schedule_path = os.path.join(schedule_dir, f"schedule_{instance_name}.csv")
     actual_path = os.path.join(schedule_dir, f"Actual_{instance_name}.csv")
     if not (os.path.exists(schedule_path) and os.path.exists(actual_path)):
         return None
@@ -68,7 +74,7 @@ def _schedule_diff_stats(merged):
 def _actual_sum_of_cost(merged):
     """The measured counterpart to main.py's compute_sum_of_costs: sum over robots of each
     robot's ACTUAL arrival time at its last scheduled node, rather than the planned ETA.
-    `merged` preserves schedule.csv's per-robot chronological row order (see
+    `merged` preserves schedule_<instance_name>.csv's per-robot chronological row order (see
     `_merged_schedule_df`), so a robot's last row is its route's goal node.
 
     Left blank ("") -- rather than a partial sum over only the robots that finished -- unless
@@ -141,7 +147,8 @@ def _copy_sched_adherence_csv(src_path, out_name):
 
 def _write_instance_csv(instance_name, merged):
     """Per-instance node log: just the planned-vs-actual ETA breakdown, one line per scheduled
-    node -- i.e. schedule.csv and Actual_<instance_name>.csv joined on (robot_id, node_id).
+    node -- i.e. schedule_<instance_name>.csv and Actual_<instance_name>.csv joined on
+    (robot_id, node_id).
     The run's summary fields (RESULT_FIELDS) live in experiments_results.csv only; this file
     carries no per-run identification of its own."""
     node_fields = ["robot_id", "node_id", "ETA_planned", "ETA_actual", "ETA_diff"]
@@ -296,6 +303,12 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
                                 collision_margin=0.0,
                                 agent_radius=agent_radius,
                                 conflict_time_margin=conflict_time_margin,
+                                # Keys schedule.csv/robot_start.json/Actual_*.csv/
+                                # SchedAdherence_*.csv by instance_name instead of the fixed
+                                # default names, so this instance's run can't collide with a
+                                # different instance's run against the same project checkout
+                                # (e.g. two parallel Slurm shards -- see hpc/arrhenius/).
+                                run_tag=instance_name,
                             )
 
                             # general_funct returns {"status": "no_schedule", ...} without ever

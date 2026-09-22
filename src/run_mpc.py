@@ -161,7 +161,8 @@ def relax_final_eta(path_coords, path_times, lin_vel_max):
 
 def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, recording=False, mpc_backend=None,
             headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0, stuck_eps=0.02,
-            stuck_arrival_tol=0.3, collision_check=True, collision_margin=0.0, verbose=False):
+            stuck_arrival_tol=0.3, collision_check=True, collision_margin=0.0, verbose=False,
+            run_tag=None):
     """Run the MPC simulation loop.
 
     Args:
@@ -209,6 +210,10 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
         reached their final goal regardless of `status` -- e.g. a "late"/"stuck"/"collision"
         failure or a "timeout" can still report some robots finished, since those checks
         stop the whole run rather than rewinding robots that already got there.
+        run_tag: see general_funct's docstring -- None (default) reads the fixed
+        schedule.csv/robot_start.json and keys the two output CSVs by `problem`, as before;
+        given, it reads schedule_<run_tag>.csv/robot_start_<run_tag>.json and keys the output
+        CSVs by run_tag instead, so a concurrent caller's files never collide with another's.
     """
 
     DATA_NAME = "schedule_demo2_data" # "schedule_demo_data"
@@ -251,10 +256,12 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
         print(f"[run_mpc] NMPC backend: {solver_type}")
 
     ### Map, graph, and schedule paths
+    run_suffix = f"_{run_tag}" if run_tag else ""
+    output_key = run_tag if run_tag is not None else problem
     map_path = os.path.join(data_dir, f"{EnvFolder}/map.json")
     test_case_path = os.path.join(root_dir, "data", "test_cases", f"{problem}.json")
-    schedule_path = os.path.join(data_dir, "schedule.csv")
-    start_path = os.path.join(data_dir, "robot_start.json")
+    schedule_path = os.path.join(data_dir, f"schedule{run_suffix}.csv")
+    start_path = os.path.join(data_dir, f"robot_start{run_suffix}.json")
     with open(start_path, "r") as f:
         robot_starts = json.load(f)
 
@@ -519,7 +526,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
 
     # The realised timetable, in the planned schedule's own format.
     arrival_logger.finalize()
-    actual_schedule_path = os.path.join(data_dir, f"Actual_{problem}.csv")
+    actual_schedule_path = os.path.join(data_dir, f"Actual_{output_key}.csv")
     arrival_logger.to_csv(actual_schedule_path)
     if VERBOSE:
         print(f"Actual schedule saved to: {actual_schedule_path}")
@@ -529,7 +536,7 @@ def run_mpc(EnvFolder, problem, naive_tracker=False, ignore_speed_ref=False, rec
 
     # Per-second actual-vs-schedule-expected (x, y) for every robot -- see
     # ScheduleAdherenceLogger's docstring for how "expected" is computed.
-    sched_adherence_path = os.path.join(data_dir, f"SchedAdherence_{problem}.csv")
+    sched_adherence_path = os.path.join(data_dir, f"SchedAdherence_{output_key}.csv")
     sched_adherence_logger.to_csv(sched_adherence_path)
     if VERBOSE:
         print(f"Schedule adherence log saved to: {sched_adherence_path}")

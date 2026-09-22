@@ -49,6 +49,14 @@
 # location for every job, so concurrent shards at the *same new* radius would duplicate that
 # one-time build rather than race-corrupt it (AOC-CBS writes the finished file, not a partial
 # one, under its own cache key).
+#
+# Working-file note: general_funct/run_mpc used to write the live schedule.csv/robot_start.json
+# (and read/write Actual_<problem>.csv/SchedAdherence_<problem>.csv) under one fixed name in
+# data/schedule_demo2_data/ regardless of which instance was running -- fine for one process at
+# a time, but two shards running different instances against this one shared checkout would
+# stomp on each other's files mid-run. ExperimentsRunner.ExpRunner now passes
+# run_tag=instance_name into general_funct, which keys all of those files by instance name
+# instead, so shards for different instances no longer collide there either.
 
 set -euo pipefail
 

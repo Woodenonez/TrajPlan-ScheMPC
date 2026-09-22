@@ -61,7 +61,7 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
                   first_solution_only=False, headless=False, late_threshold_s=30.0, stuck_timeout_s=30.0,
                   collision_check=True, collision_margin=0.0, verbose=False, show_initial_state=False,
                   scheduler_timeout_s=None, scheduler_optimality_gap=0.0, agent_radius=None,
-                  conflict_time_margin=None):
+                  conflict_time_margin=None, run_tag=None):
     """
     verbose: If False (default), the scheduler and MPC loop only print a handful of
         timestamped status lines (scheduler executing/done/UNSAT, MPC executing/done).
@@ -104,6 +104,17 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         wherever two robots' plans would otherwise come close. None (default) leaves the
         backends' own 0.0 s (original behaviour). See SolverConfig.conflict_time_margin and
         src/pkg_sche/aoccbs/aoccbs_conflict_time_margin.patch.
+    run_tag: Disambiguates the working files this call writes/reads, so that several
+        general_funct calls for different problems can run at the same time -- e.g.
+        ExperimentsRunner's parallel Slurm shards (see hpc/arrhenius/), each running its own
+        slice of a sweep against the one shared project checkout -- without one call's files
+        clobbering another's. None (default) keeps the original fixed filenames -- schedule.csv,
+        robot_start.json, and (inside run_mpc) Actual_<problem>.csv/SchedAdherence_<problem>.csv
+        -- which is correct for the common case of one general_funct call running at a time,
+        including reusing a previously-saved schedule.csv via scheduler=False. When given,
+        schedule.csv and robot_start.json are written as
+        schedule_<run_tag>.csv/robot_start_<run_tag>.json instead, and run_mpc keys its two
+        output CSVs by run_tag rather than `problem`.
     """
     if show_initial_state:
         from pkg_motion_plan.initial_state_plot import plot_initial_state
@@ -154,10 +165,11 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
             return {"status": "no_schedule", "problem": problem}
 
         # save the schedule (I don't actually need this step, but it is more readable than the csv)
-        with open(f"{src_path}/pkg_sche/MPC_input.json",'w') as logfile:
+        run_suffix = f"_{run_tag}" if run_tag else ""
+        with open(f"{src_path}/pkg_sche/MPC_input{run_suffix}.json",'w') as logfile:
             json.dump(solution, logfile, indent=4)
 
-        with open(f"{data_path}/schedule_demo2_data/schedule.csv", mode="w", newline="") as csv_file:
+        with open(f"{data_path}/schedule_demo2_data/schedule{run_suffix}.csv", mode="w", newline="") as csv_file:
             csv_writer = csv.writer(csv_file)
             csv_writer.writerow(["robot_id", "node_id", "ETA"])
             for robot_id, nodes in solution.items():
@@ -175,7 +187,7 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
             ]
             for key,value in ATRs.items()
         }
-        with open(f"{data_path}/schedule_demo2_data/robot_start.json", 'w') as write_file:
+        with open(f"{data_path}/schedule_demo2_data/robot_start{run_suffix}.json", 'w') as write_file:
             json.dump(robot_starts, write_file, indent=4)
 
         # if scheduler_backend in DISTANCE_SCHEDULER_BACKENDS:
@@ -197,7 +209,8 @@ def general_funct(problem, scheduler=True, controller=True, naive_tracker=False,
         result = run_mpc(EnvFolder, problem, naive_tracker=naive_tracker, ignore_speed_ref=ignore_speed_ref,
                 recording=recording, mpc_backend=mpc_backend, headless=headless,
                 late_threshold_s=late_threshold_s, stuck_timeout_s=stuck_timeout_s,
-                collision_check=collision_check, collision_margin=collision_margin, verbose=verbose)
+                collision_check=collision_check, collision_margin=collision_margin, verbose=verbose,
+                run_tag=run_tag)
         simulation_runtime_s = time.perf_counter() - sim_start
         status(f"MPC simulation wall-clock runtime: {simulation_runtime_s:.2f}s")
         result["simulation_runtime_s"] = simulation_runtime_s
