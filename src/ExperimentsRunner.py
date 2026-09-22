@@ -363,7 +363,9 @@ if __name__ == "__main__":
 
     methods = ["grid","sampled"]  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
-    connectedness = 4  # roadmap connectedness for "grid" instances only; ignored for "sampled"
+    # "grid" sweeps roadmap connectedness itself (it changes the instance graph); any other
+    # method ignores the knob and runs once, so it isn't listed here.
+    connectedness_by_method = {"grid": [4, 8]}
 
     # Which knob this run sweeps -- "agent_radius" or "conflict_time_margin". The other one is
     # held at its default (None) for every instance in the sweep.
@@ -393,16 +395,17 @@ if __name__ == "__main__":
         raise ValueError(f"sweep_param must be 'agent_radius' or 'conflict_time_margin', got {sweep_param!r}")
 
     for method in methods:
-        method_label = _method_label(method, connectedness)
-        # sweep_values[0] is already fully run (see experiments_results.csv) -- start the retry
-        # chain from it instead of re-running the whole grid at that value.
-        prev_value = sweep_values[0]
-        for value in sweep_values[1:]:
-            retry = _failed_instances(prev_value, schedulers, maps, scenarios, n_agents, seeds, method_label,
-                                       value_column=sweep_param,
-                                       fail_reasons=fail_reasons)
-            for scheduler, map_name, scenario, n_agent, seed in retry:
-                sweep_kwargs = {"agent_radius": None, "conflict_time_margin": None, sweep_param: value}
-                ExpRunner([scheduler], [map_name], [scenario], [n_agent], [seed],
-                          method=method, connectedness=connectedness, **sweep_kwargs)
-            prev_value = value
+        for connectedness in connectedness_by_method.get(method, [None]):
+            method_label = _method_label(method, connectedness)
+            # sweep_values[0] is already fully run (see experiments_results.csv) -- start the
+            # retry chain from it instead of re-running the whole grid at that value.
+            prev_value = sweep_values[0]
+            for value in sweep_values[1:]:
+                retry = _failed_instances(prev_value, schedulers, maps, scenarios, n_agents, seeds, method_label,
+                                           value_column=sweep_param,
+                                           fail_reasons=fail_reasons)
+                for scheduler, map_name, scenario, n_agent, seed in retry:
+                    sweep_kwargs = {"agent_radius": None, "conflict_time_margin": None, sweep_param: value}
+                    ExpRunner([scheduler], [map_name], [scenario], [n_agent], [seed],
+                              method=method, connectedness=connectedness, **sweep_kwargs)
+                prev_value = value
