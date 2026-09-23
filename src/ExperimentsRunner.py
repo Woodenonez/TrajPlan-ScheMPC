@@ -544,27 +544,28 @@ if __name__ == "__main__":
     scenarios = ['1']
 
     n_agents = [
-        # 4
-        21,22,23,24,25,26,27,28,29,30,
-        31,32,33,34,35,36,37,38,39,40,
+        4,5
+        # 21,22,23,24,25,26,27,28,29,30,
+        # 31,32,33,34,35,36,37,38,39,40,
     ]
 
     seeds = [
-        5,6,7,8,9
+        5,
+        # 6,7,8,9
     ]
 
     # How many instances to run at once, each pinned to its own CPU core (see
     # `_dispatch_jobs`/`_pin_worker`). None or 1 = sequential, one instance at a time, exactly
     # like this script always ran. cpu_ids=None uses every core this process can currently run
     # on; pass an explicit list (e.g. [2, 3, 4, 5]) to reserve the rest for other work.
-    n_workers = 20
+    n_workers = 2
     cpu_ids = None
 
     # True (default) writes each combo's own nodeLog/SchedAdher CSVs into data/results, on top
     # of the always-written summary row in experiments_results.csv (see `ExpRunner`'s
     # save_instance_files docstring). Set False for a big sweep where only the summary rows get
     # consulted afterwards, to avoid writing one pair of per-instance files per combo.
-    save_instance_files = True
+    save_instance_files = False
 
     methods = ["grid","sampled"]  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
