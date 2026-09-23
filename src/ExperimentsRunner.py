@@ -566,29 +566,28 @@ if __name__ == "__main__":
 
     maps = [
             # 'den312d',
-            # 'maze-32-32-2',
-            'empty-16-16'
+            'maze-32-32-2',
+            # 'empty-16-16'
             # 'room-32-32-4',
             ]
 
     scenarios = ['1']
 
     n_agents = [
-        4,5
-        # 21,22,23,24,25,26,27,28,29,30,
-        # 31,32,33,34,35,36,37,38,39,40,
+        # 4,5
+        21,22,23,24,25,26,27,28,29,30,
+        31,32,33,34,35,36,37,38,39,40,
     ]
 
     seeds = [
-        5,
-        # 6,7,8,9
+        5,6,7,8,9
     ]
 
     # How many instances to run at once, each pinned to its own CPU core (see
     # `_dispatch_jobs`/`_pin_worker`). None or 1 = sequential, one instance at a time, exactly
     # like this script always ran. cpu_ids=None uses every core this process can currently run
     # on; pass an explicit list (e.g. [2, 3, 4, 5]) to reserve the rest for other work.
-    n_workers = 2
+    n_workers = 20
     cpu_ids = None
 
     # True (default) writes each combo's own nodeLog/SchedAdher CSVs into data/results, on top
@@ -597,15 +596,15 @@ if __name__ == "__main__":
     # consulted afterwards, to avoid writing one pair of per-instance files per combo.
     save_instance_files = False
 
-    methods = ["grid","sampled"]  # "grid" or "sampled" -- how convert_movingai builds the instance graph
+    methods = ["grid"]  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
     # "grid" sweeps roadmap connectedness itself (it changes the instance graph); any other
     # method ignores the knob and runs once, so it isn't listed here.
-    connectedness_by_method = {"grid": [4, 8]}
+    connectedness_by_method = {"grid": [8]} # 4,8
 
     # Which knob this run sweeps -- "agent_radius" or "conflict_time_margin". The other one is
     # held at its default (None) for every instance in the sweep.
-    sweep_param = "conflict_time_margin"
+    sweep_param = "agent_radius"
 
     agent_radii = [0.35 * m for m in [1,1.25,1.5,1.75,2,2.25,2.5]]
     ctms = [0,10,15,20,25,30]
