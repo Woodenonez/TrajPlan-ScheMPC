@@ -231,6 +231,36 @@ def _failed_instances(prev_value, schedulers, maps, scenarios, n_agents, seeds, 
     ]
 
 
+def _missing_baseline_instances(schedulers, maps, scenarios, n_agents, seeds, method):
+    """(scheduler, map, scenario, n_agent, seed) combos -- drawn from the given lists -- that
+    have no row at all yet in experiments_results.csv under this method label, at any
+    value_column setting. The __main__ sweep below only ever dispatches jobs via
+    `_failed_instances(sweep_values[0], ...)`, i.e. it re-runs combos that already have a
+    baseline row at sweep_values[0] and failed there; a combo that has never been run at all
+    (e.g. a map added to `maps` for the first time) has no such row, so `_failed_instances`
+    returns [] for it at every sweep value and the whole sweep silently does nothing for it.
+    This is what the sweep loop uses to give every such combo its missing baseline run, at
+    sweep_values[0], before the retry chain starts. Returns every combo in the cross product if
+    experiments_results.csv doesn't exist yet."""
+    all_combos = [
+        (scheduler, map_name, str(scenario), n_agent, seed)
+        for scheduler in schedulers
+        for map_name in maps
+        for scenario in scenarios
+        for n_agent in n_agents
+        for seed in seeds
+    ]
+    if not os.path.exists(results_csv_path):
+        return all_combos
+
+    df = pd.read_csv(results_csv_path, dtype=str, keep_default_na=False)
+    seen = {
+        (row["scheduler"], row["map"], row["scenario"], int(row["n_agents"]), int(row["seed"]))
+        for _, row in df[df["method"] == method].iterrows()
+    }
+    return [combo for combo in all_combos if combo not in seen]
+
+
 def _available_cores():
     """The CPU core ids this process may actually be scheduled on -- respects a taskset/cgroup
     restriction on Linux -- or, on a platform with no affinity API at all (notably macOS), every
@@ -599,8 +629,34 @@ if __name__ == "__main__":
     for method in methods:
         for connectedness in connectedness_by_method.get(method, [None]):
             method_label = _method_label(method, connectedness)
-            # sweep_values[0] is already fully run (see experiments_results.csv) -- start the
-            # retry chain from it instead of re-running the whole grid at that value.
+
+            # Give any combo that has never been run at all under this method_label (e.g. a map
+            # just added to `maps`) its missing baseline run at sweep_values[0], before assuming
+            # -- as the retry chain below does -- that sweep_values[0] is already fully run.
+            # Without this, such a combo has no row for `_failed_instances` to find at
+            # sweep_values[0], so every retry step below sees it as neither present nor failed
+            # and the whole sweep silently skips it.
+            missing_baseline = _missing_baseline_instances(schedulers, maps, scenarios, n_agents,
+                                                             seeds, method_label)
+            if missing_baseline:
+                baseline_kwargs = {"agent_radius": None, "conflict_time_margin": None,
+                                    sweep_param: sweep_values[0]}
+                baseline_jobs = [
+                    {
+                        "scheduler": scheduler, "map": map_name, "scenario": scenario,
+                        "n_agent": n_agent, "seed": seed, "method": method,
+                        "connectedness": connectedness, "method_label": method_label,
+                        "agent_radius": baseline_kwargs["agent_radius"],
+                        "conflict_time_margin": baseline_kwargs["conflict_time_margin"],
+                        "save_instance_files": save_instance_files,
+                    }
+                    for scheduler, map_name, scenario, n_agent, seed in missing_baseline
+                ]
+                _dispatch_jobs(baseline_jobs, n_workers=n_workers, cpu_ids=cpu_ids)
+
+            # sweep_values[0] is now fully run (either from a prior invocation, or from the
+            # baseline dispatch just above) -- start the retry chain from it instead of
+            # re-running the whole grid at that value.
             prev_value = sweep_values[0]
             for value in sweep_values[1:]:
                 retry = _failed_instances(prev_value, schedulers, maps, scenarios, n_agents, seeds, method_label,
