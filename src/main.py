@@ -227,8 +227,8 @@ if __name__ == "__main__":
     
     result = general_funct(
         sys.argv[1],
-        scheduler = True,
-        controller= True,
+        scheduler = False,
+        controller= False,
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
@@ -277,7 +277,7 @@ if __name__ == "__main__":
                               # console output; False = just the timestamped status lines
                               # (scheduler executing/done/UNSAT, MPC executing/done) -- handy
                               # when running several instances back to back.
-        show_initial_state= False, # True = pop up a plot of the map, graph, and each robot's
+        show_initial_state= True, # True = pop up a plot of the map, graph, and each robot's
                               # start/goal markers as soon as this runs, before the scheduler
                               # starts computing. Blocks until the plot window is closed.
     )

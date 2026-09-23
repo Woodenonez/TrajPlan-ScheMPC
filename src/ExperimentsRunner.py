@@ -525,7 +525,8 @@ if __name__ == "__main__":
 
     maps = [
             # 'den312d',
-            'maze-32-32-2',
+            # 'maze-32-32-2',
+            'empty-16-16'
             # 'room-32-32-4',
             ]
 
@@ -545,7 +546,7 @@ if __name__ == "__main__":
     # `_dispatch_jobs`/`_pin_worker`). None or 1 = sequential, one instance at a time, exactly
     # like this script always ran. cpu_ids=None uses every core this process can currently run
     # on; pass an explicit list (e.g. [2, 3, 4, 5]) to reserve the rest for other work.
-    n_workers = 1
+    n_workers = 20
     cpu_ids = None
 
     methods = ["grid","sampled"]  # "grid" or "sampled" -- how convert_movingai builds the instance graph
@@ -556,13 +557,9 @@ if __name__ == "__main__":
 
     # Which knob this run sweeps -- "agent_radius" or "conflict_time_margin". The other one is
     # held at its default (None) for every instance in the sweep.
-    sweep_param = "agent_radius"
+    sweep_param = "conflict_time_margin"
 
-    agent_radi = [
-                  1,1.25,1.5,1.75,2,2.25,2.5
-                  ]
-    agent_radii = [0.35 * m for m in agent_radi]
-
+    agent_radii = [0.35 * m for m in [1,1.25,1.5,1.75,2,2.25,2.5]]
     ctms = [0,10,15,20,25,30]
 
     if sweep_param == "agent_radius":

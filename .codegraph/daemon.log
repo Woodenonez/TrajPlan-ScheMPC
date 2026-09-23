@@ -68,3 +68,8 @@
 [2026-09-22T12:37:24.711Z] [CodeGraph MCP] Auto-synced 1 file(s) in 109ms
 [2026-09-22T12:38:05.104Z] [CodeGraph MCP] Auto-synced 1 file(s) in 48ms
 [2026-09-22T12:38:28.315Z] [CodeGraph MCP] Auto-synced 1 file(s) in 189ms
+[2026-09-23T06:07:12.756Z] [CodeGraph daemon] Listening on /Users/sabinoroselli/PycharmProjects/TrajPlan-ScheMPC/.codegraph/daemon.sock (pid 49259, v1.6.0). Idle timeout 300000ms.
+[2026-09-23T06:07:12.760Z] [CodeGraph daemon] Another daemon (pid 49259) already holds the lock; exiting.
+[2026-09-23T06:07:12.852Z] [CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[2026-09-23T06:07:12.854Z] [CodeGraph MCP] Query pool: up to 10 worker thread(s) for concurrent reads.
+[2026-09-23T06:07:13.440Z] [CodeGraph MCP] Caught up 4 file(s) changed since last run
