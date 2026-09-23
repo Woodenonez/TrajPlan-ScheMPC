@@ -274,7 +274,7 @@ def _run_one_combo(job):
 
     `job` is a plain dict (picklable, for `_dispatch_jobs`'s process pool) with keys: scheduler,
     map, scenario, n_agent, seed, method, connectedness, method_label, agent_radius,
-    conflict_time_margin.
+    conflict_time_margin, save_instance_files.
 
     Writing the row itself to experiments_results.csv is left to the caller, since that file is
     shared across every combo in a sweep and `_dispatch_jobs` is what serialises those writes
@@ -289,6 +289,7 @@ def _run_one_combo(job):
     method_label = job["method_label"]
     agent_radius = job["agent_radius"]
     conflict_time_margin = job["conflict_time_margin"]
+    save_instance_files = job.get("save_instance_files", True)
 
     instance_name = f'{map_name}_scenario-{scenario}_{n_agent}_{seed}'
     row = {
@@ -390,10 +391,11 @@ def _run_one_combo(job):
     # conflict_time_margin=None falls back to the aoccbs/pp_sipp backends' own
     # 0.0 s default (see general_funct), so name the file after what actually ran.
     ctm_str = "0.0" if conflict_time_margin is None else str(conflict_time_margin)
-    node_log_name = f'{instance_name}_{scheduler}_{method_label}_rd{rd_str}_ctm{ctm_str}_nodeLog'
-    _write_instance_csv(node_log_name, merged)
-    sched_adher_name = f'{instance_name}_{scheduler}_{method_label}_rd{rd_str}_ctm{ctm_str}_SchedAdher'
-    _copy_sched_adherence_csv(sched_adherence_src, sched_adher_name)
+    if save_instance_files:
+        node_log_name = f'{instance_name}_{scheduler}_{method_label}_rd{rd_str}_ctm{ctm_str}_nodeLog'
+        _write_instance_csv(node_log_name, merged)
+        sched_adher_name = f'{instance_name}_{scheduler}_{method_label}_rd{rd_str}_ctm{ctm_str}_SchedAdher'
+        _copy_sched_adherence_csv(sched_adherence_src, sched_adher_name)
 
     return row
 
@@ -487,7 +489,7 @@ def _dispatch_jobs(jobs, n_workers=None, cpu_ids=None):
 
 def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
               connectedness=4, agent_radius=None, conflict_time_margin=None,
-              n_workers=None, cpu_ids=None):
+              n_workers=None, cpu_ids=None, save_instance_files=True):
     """Run every combo in the cross product of schedulers x maps x scenarios x n_agents x
     seeds, at the given method/connectedness/agent_radius/conflict_time_margin, and append
     each combo's row to experiments_results.csv.
@@ -495,7 +497,15 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
     n_workers / cpu_ids: see `_dispatch_jobs` -- None (default) runs every combo sequentially,
     exactly as this function always has; an int > 1 runs up to that many instances at once,
     each pinned to its own CPU core (combos that share an instance_name, e.g. the same instance
-    compared across two entries in `schedulers`, still run one after another)."""
+    compared across two entries in `schedulers`, still run one after another).
+
+    save_instance_files: True (default, original behaviour) writes each combo's own
+    <instance>..._nodeLog.csv (planned-vs-actual per-node ETA breakdown) and
+    ..._SchedAdher.csv (per-second schedule-adherence copy) into data/results, alongside the
+    always-written summary row in experiments_results.csv. False skips both files for every
+    combo in this call -- useful for a large sweep (many maps/agents/seeds x several sweep
+    values, optionally n_workers-parallel) where experiments_results.csv's summary row is all
+    that's actually consulted afterwards and the per-instance CSVs would just be disk churn."""
     print('Agent radius:', agent_radius)
 
     method_label = _method_label(method, connectedness)  # e.g. "grid(4)"; only "grid" uses it
@@ -508,6 +518,7 @@ def ExpRunner(schedulers, maps, scenarios, n_agents, seeds, method="grid",
             "n_agent": n_agent, "seed": seed, "method": method,
             "connectedness": connectedness, "method_label": method_label,
             "agent_radius": agent_radius, "conflict_time_margin": conflict_time_margin,
+            "save_instance_files": save_instance_files,
         }
         for scheduler in schedulers
         for map_name in maps
@@ -547,6 +558,12 @@ if __name__ == "__main__":
     # on; pass an explicit list (e.g. [2, 3, 4, 5]) to reserve the rest for other work.
     n_workers = 1
     cpu_ids = None
+
+    # True (default) writes each combo's own nodeLog/SchedAdher CSVs into data/results, on top
+    # of the always-written summary row in experiments_results.csv (see `ExpRunner`'s
+    # save_instance_files docstring). Set False for a big sweep where only the summary rows get
+    # consulted afterwards, to avoid writing one pair of per-instance files per combo.
+    save_instance_files = True
 
     methods = ["grid","sampled"]  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
@@ -599,6 +616,7 @@ if __name__ == "__main__":
                         "connectedness": connectedness, "method_label": method_label,
                         "agent_radius": sweep_kwargs["agent_radius"],
                         "conflict_time_margin": sweep_kwargs["conflict_time_margin"],
+                        "save_instance_files": save_instance_files,
                     }
                     for scheduler, map_name, scenario, n_agent, seed in retry
                 ]
