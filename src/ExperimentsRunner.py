@@ -231,7 +231,8 @@ def _failed_instances(prev_value, schedulers, maps, scenarios, n_agents, seeds, 
     ]
 
 
-def _missing_baseline_instances(schedulers, maps, scenarios, n_agents, seeds, method):
+def _missing_baseline_instances(schedulers, maps, scenarios, n_agents, seeds, method,
+                                value_column=None, value=None):
     """(scheduler, map, scenario, n_agent, seed) combos -- drawn from the given lists -- that
     have no row at all yet in experiments_results.csv under this method label, at any
     value_column setting. The __main__ sweep below only ever dispatches jobs via
@@ -254,9 +255,14 @@ def _missing_baseline_instances(schedulers, maps, scenarios, n_agents, seeds, me
         return all_combos
 
     df = pd.read_csv(results_csv_path, dtype=str, keep_default_na=False)
+    rows = df[df["method"] == method]
+    if value_column is not None:
+        # a row from a different sweep (e.g. a conflict_time_margin run when sweeping
+        # agent_radius) leaves value_column blank and doesn't count as this sweep's baseline
+        rows = rows[rows[value_column] == ("" if value is None else str(value))]
     seen = {
         (row["scheduler"], row["map"], row["scenario"], int(row["n_agents"]), int(row["seed"]))
-        for _, row in df[df["method"] == method].iterrows()
+        for _, row in rows.iterrows()
     }
     return [combo for combo in all_combos if combo not in seen]
 
@@ -566,8 +572,8 @@ if __name__ == "__main__":
 
     maps = [
             # 'den312d',
-            'maze-32-32-2',
-            # 'empty-16-16'
+            # 'maze-32-32-2',
+            'empty-16-16'
             # 'room-32-32-4',
             ]
 
@@ -596,11 +602,11 @@ if __name__ == "__main__":
     # consulted afterwards, to avoid writing one pair of per-instance files per combo.
     save_instance_files = False
 
-    methods = ["grid"]  # "grid" or "sampled" -- how convert_movingai builds the instance graph
+    methods = ["grid","sampled"]  # "grid" or "sampled" -- how convert_movingai builds the instance graph
 
     # "grid" sweeps roadmap connectedness itself (it changes the instance graph); any other
     # method ignores the knob and runs once, so it isn't listed here.
-    connectedness_by_method = {"grid": [8]} # 4,8
+    connectedness_by_method = {"grid": [4,8]} # 4,8
 
     # Which knob this run sweeps -- "agent_radius" or "conflict_time_margin". The other one is
     # held at its default (None) for every instance in the sweep.
@@ -636,7 +642,9 @@ if __name__ == "__main__":
             # sweep_values[0], so every retry step below sees it as neither present nor failed
             # and the whole sweep silently skips it.
             missing_baseline = _missing_baseline_instances(schedulers, maps, scenarios, n_agents,
-                                                             seeds, method_label)
+                                                             seeds, method_label,
+                                                             value_column=sweep_param,
+                                                             value=sweep_values[0])
             if missing_baseline:
                 baseline_kwargs = {"agent_radius": None, "conflict_time_margin": None,
                                     sweep_param: sweep_values[0]}

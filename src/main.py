@@ -227,8 +227,8 @@ if __name__ == "__main__":
     
     result = general_funct(
         sys.argv[1],
-        scheduler = False,
-        controller= False,
+        scheduler = True,
+        controller= True,
         naive_tracker= False, # True = proportional baseline, False = NMPC (see mpc_backend)
         ignore_speed_ref= False,
         recording= False,
@@ -256,7 +256,7 @@ if __name__ == "__main__":
         mpc_backend= "panoc", # "casadi" (IPOPT, no build step); "panoc" or "panoc_light" (both
                               # need build_solver.py, with panoc_builder set to match -- see
                               # build_solver.py); None falls back to solver_type in config/mpc_fast.yaml
-        headless= True, # True = no matplotlib window, no blocking prompt at the end; run
+        headless= False, # True = no matplotlib window, no blocking prompt at the end; run
                               # non-interactively and just return/print a status dict --
                               # see late_threshold_s/stuck_timeout_s below for failure detection
         late_threshold_s= 30.0, # fail the run once a robot is still short of the node it is

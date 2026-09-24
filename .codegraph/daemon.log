@@ -79,3 +79,6 @@
 [2026-09-23T15:01:40.000Z] [CodeGraph MCP] File watcher active — graph will auto-sync on changes
 [2026-09-23T15:01:40.001Z] [CodeGraph MCP] Query pool: up to 10 worker thread(s) for concurrent reads.
 [2026-09-23T15:01:40.421Z] [CodeGraph MCP] Caught up 1 file(s) changed since last run
+[2026-09-23T15:03:20.297Z] [CodeGraph MCP] Auto-synced 1 file(s) in 50ms
+[2026-09-23T18:20:06.809Z] [CodeGraph MCP] Auto-synced 1 file(s) in 365ms
+[2026-09-23T22:21:07.947Z] [CodeGraph daemon] Shutting down (idle timeout; clients=0).
